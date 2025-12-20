@@ -90,12 +90,13 @@ pub struct Gemma3Model {
 }
 
 impl Gemma3Model {
-    fn parse_metadata(content: &gguf_file::Content, device: &Device) -> ModelInfo {
+    fn parse_metadata(content: &gguf_file::Content, device: &Device) -> anyhow::Result<ModelInfo> {
         let num_layers = content
             .metadata
             .get("gemma3.block_count")
             .and_then(|v| v.to_u32())
-            .unwrap_or_default() as usize;
+            .ok_or_else(|| anyhow::anyhow!("Missing critical metadata: gemma3.block_count"))?
+            as usize;
 
         let max_seq_len = content
             .metadata
@@ -120,13 +121,13 @@ impl Gemma3Model {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 
-        ModelInfo {
+        Ok(ModelInfo {
             num_layers,
             max_seq_len,
             dtype,
             device: device.clone(),
             target_device,
-        }
+        })
     }
 
     async fn load_chat_template_env(repo_id: &str) -> anyhow::Result<Arc<Environment<'static>>> {
@@ -174,7 +175,7 @@ impl Gemma3Model {
         size: Gemma3Size,
     ) -> anyhow::Result<Self> {
         let content = gguf_file::Content::read(reader)?;
-        let info = Self::parse_metadata(&content, device);
+        let info = Self::parse_metadata(&content, device)?;
         let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
             content, reader, device,
         )?);
@@ -199,7 +200,7 @@ impl Gemma3Model {
     pub async fn from_hf(device: &Device, size: Gemma3Size) -> anyhow::Result<Self> {
         let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
         let (mut file, content) = loader.load().await?;
-        let info = Self::parse_metadata(&content, device);
+        let info = Self::parse_metadata(&content, device)?;
         let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
             content, &mut file, device,
         )?);
