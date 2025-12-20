@@ -41,11 +41,11 @@ pub trait TextGenerationModel {
 
     fn apply_chat_template(&self, messages: &[Message]) -> anyhow::Result<String>;
 
-    fn get_eos_token(&self) -> u32;
+    fn get_eos_token(&self) -> Option<u32>;
 
     /// Get all EOS token IDs for robust termination detection
     fn get_eos_tokens(&self) -> Vec<u32> {
-        vec![self.get_eos_token()]
+        self.get_eos_token().into_iter().collect()
     }
 
     fn get_max_seq_len(&self) -> usize;

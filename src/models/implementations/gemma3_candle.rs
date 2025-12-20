@@ -158,6 +158,16 @@ impl Gemma3Model {
             .collect()
     }
 
+    fn ensure_eos_tokens(config: &GenerationConfig) -> anyhow::Result<()> {
+        if config.eos_token_ids.is_empty() {
+            anyhow::bail!(
+                "Gemma3 generation config is missing 'eos_token_ids'; cannot determine end-of-sequence tokens"
+            );
+        }
+
+        Ok(())
+    }
+
     pub async fn from_gguf<R: Read + Seek>(
         reader: &mut R,
         device: &Device,
@@ -173,6 +183,7 @@ impl Gemma3Model {
             GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json")
                 .load()
                 .await?;
+        Self::ensure_eos_tokens(&generation_config)?;
         let chat_template_env = Self::load_chat_template_env(&tokenizer_repo_id).await?;
 
         Ok(Self {
@@ -197,6 +208,7 @@ impl Gemma3Model {
             GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json")
                 .load()
                 .await?;
+        Self::ensure_eos_tokens(&generation_config)?;
         let chat_template_env = Self::load_chat_template_env(&tokenizer_repo_id).await?;
 
         Ok(Self {
@@ -294,8 +306,8 @@ impl TextGenerationModel for Gemma3Model {
         Ok(rendered)
     }
 
-    fn get_eos_token(&self) -> u32 {
-        self.eos_tokens().into_iter().next().unwrap_or_default()
+    fn get_eos_token(&self) -> Option<u32> {
+        self.eos_tokens().into_iter().next()
     }
 
     fn get_eos_tokens(&self) -> Vec<u32> {

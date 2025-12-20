@@ -97,6 +97,9 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
         // Generate autoregressively
         let eos_tokens = self.model.lock().await.get_eos_tokens();
+        if eos_tokens.is_empty() {
+            anyhow::bail!("Model provided no EOS tokens; cannot run text generation");
+        }
         for _ in 0..params.max_len {
             if eos_tokens.contains(&next_token) {
                 break;
@@ -156,6 +159,9 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         async_stream::try_stream! {
             let params = gen_params.lock().await.clone();
             let eos_tokens = model.lock().await.get_eos_tokens();
+            if eos_tokens.is_empty() {
+                anyhow::bail!("Model provided no EOS tokens; cannot stream text generation");
+            }
             const CHUNK_SIZE: usize = 64;
 
             let mut logits_processor =

@@ -829,9 +829,13 @@ impl TextGenerationModel for Qwen3Model {
     type Context = Context;
     type Options = Qwen3Size;
 
-    fn get_eos_token(&self) -> u32 {
+    fn get_eos_token(&self) -> Option<u32> {
         // Return the first EOS token ID from the generation config
-        self.generation_config.eos_token_ids[0] as u32
+        self.generation_config
+            .eos_token_ids
+            .first()
+            .copied()
+            .map(|id| id as u32)
     }
 
     fn get_eos_tokens(&self) -> Vec<u32> {
