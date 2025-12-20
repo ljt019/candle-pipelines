@@ -1002,9 +1002,11 @@ impl TextGenerationModel for Gemma3Model {
             seed: 42,
             // Gemma3 supports very long context, but keep a sane default
             max_len: 8192,
-            top_p: self.generation_config.top_p.unwrap_or(0.95),
-            top_k: self.generation_config.top_k.unwrap_or(64) as usize,
-            min_p: self.generation_config.min_p.unwrap_or(0.0),
+            sampling: crate::models::generation::params::SamplingParams {
+                top_p: Some(self.generation_config.top_p.unwrap_or(0.95)),
+                top_k: Some(self.generation_config.top_k.unwrap_or(64) as usize),
+                min_p: Some(self.generation_config.min_p.unwrap_or(0.0)).filter(|v| *v > 0.0),
+            },
         }
     }
 }

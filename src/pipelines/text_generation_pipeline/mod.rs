@@ -61,7 +61,7 @@ pub use xml_pipeline::XmlGenerationPipeline;
 // the common model size enums and the `#[tool]` macro without additional
 // import clutter.
 
-pub use crate::models::generation::GenerationParams;
+pub use crate::models::generation::{GenerationParams, HfGenerationParams};
 pub use crate::models::{Gemma3Size, Qwen3Size};
 
 // Re-export the procedural macro (functions as an item in Rust 2018+).

@@ -921,9 +921,11 @@ impl TextGenerationModel for Qwen3Model {
             repeat_last_n: self.generation_config.repeat_last_n.unwrap_or(64),
             seed: 42,
             max_len: 2048, // Qwen3 context length
-            top_p: self.generation_config.top_p.unwrap_or(0.95),
-            top_k: self.generation_config.top_k.unwrap_or(20) as usize,
-            min_p: self.generation_config.min_p.unwrap_or(0.0),
+            sampling: crate::models::generation::params::SamplingParams {
+                top_p: Some(self.generation_config.top_p.unwrap_or(0.95)),
+                top_k: Some(self.generation_config.top_k.unwrap_or(20) as usize),
+                min_p: Some(self.generation_config.min_p.unwrap_or(0.0)).filter(|v| *v > 0.0),
+            },
         }
     }
 }

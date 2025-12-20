@@ -1,5 +1,7 @@
 use crate::core::{global_cache, ModelOptions};
-use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
+use crate::models::{
+    generation::HfGenerationParams, Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size,
+};
 use crate::pipelines::utils::{build_cache_key, DeviceRequest, DeviceSelectable};
 
 use super::model::TextGenerationModel;
@@ -15,14 +17,7 @@ use super::xml_pipeline::XmlGenerationPipeline;
 /// The shared trait is designed for simpler builders with just options and device.
 pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
     model_options: M::Options,
-    temperature: Option<f64>,
-    repeat_penalty: Option<f32>,
-    repeat_last_n: Option<usize>,
-    seed: Option<u64>,
-    max_len: Option<usize>,
-    top_p: Option<f64>,
-    top_k: Option<usize>,
-    min_p: Option<f64>,
+    hf_params: HfGenerationParams,
     device_request: DeviceRequest,
 }
 
@@ -30,55 +25,57 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     pub fn new(options: M::Options) -> Self {
         Self {
             model_options: options,
-            temperature: None,
-            repeat_penalty: None,
-            repeat_last_n: None,
-            seed: None,
-            max_len: None,
-            top_p: None,
-            top_k: None,
-            min_p: None,
+            hf_params: HfGenerationParams::default(),
             device_request: DeviceRequest::Default,
         }
     }
 
     pub fn temperature(mut self, temperature: f64) -> Self {
-        self.temperature = Some(temperature);
+        self.hf_params.temperature = Some(temperature);
         self
     }
 
     pub fn repeat_penalty(mut self, repeat_penalty: f32) -> Self {
-        self.repeat_penalty = Some(repeat_penalty);
+        self.hf_params.repetition_penalty = Some(repeat_penalty);
         self
     }
 
+    pub fn repetition_penalty(self, repetition_penalty: f32) -> Self {
+        self.repeat_penalty(repetition_penalty)
+    }
+
     pub fn repeat_last_n(mut self, repeat_last_n: usize) -> Self {
-        self.repeat_last_n = Some(repeat_last_n);
+        self.hf_params.repeat_last_n = Some(repeat_last_n);
         self
     }
 
     pub fn seed(mut self, seed: u64) -> Self {
-        self.seed = Some(seed);
+        self.hf_params.seed = Some(seed);
         self
     }
 
     pub fn max_len(mut self, max_len: usize) -> Self {
-        self.max_len = Some(max_len);
+        self.hf_params.max_new_tokens = Some(max_len);
+        self
+    }
+
+    pub fn max_new_tokens(mut self, max_new_tokens: usize) -> Self {
+        self.hf_params.max_new_tokens = Some(max_new_tokens);
         self
     }
 
     pub fn top_p(mut self, top_p: f64) -> Self {
-        self.top_p = Some(top_p.clamp(0.0, 1.0));
+        self.hf_params.top_p = Some(top_p.clamp(0.0, 1.0));
         self
     }
 
     pub fn top_k(mut self, top_k: usize) -> Self {
-        self.top_k = Some(top_k);
+        self.hf_params.top_k = Some(top_k);
         self
     }
 
     pub fn min_p(mut self, min_p: f64) -> Self {
-        self.min_p = Some(min_p.clamp(0.0, 1.0));
+        self.hf_params.min_p = Some(min_p.clamp(0.0, 1.0));
         self
     }
 
@@ -102,19 +99,15 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             })
             .await?;
 
-        // Start with model-specific defaults
-        let default_params = model.default_generation_params();
+        // Start with model-specific defaults and merge any Hugging Face style overrides
+        let mut default_params = model.default_generation_params();
+        if self.hf_params.seed.is_none() {
+            default_params.seed = rand::random::<u64>();
+        }
 
-        // Override with any user-specified values
-        let gen_params = crate::models::generation::GenerationParams::new(
-            self.temperature.unwrap_or(default_params.temperature),
-            self.repeat_penalty.unwrap_or(default_params.repeat_penalty),
-            self.repeat_last_n.unwrap_or(default_params.repeat_last_n),
-            self.seed.unwrap_or_else(rand::random::<u64>),
-            self.max_len.unwrap_or(default_params.max_len),
-            self.top_p.unwrap_or(default_params.top_p),
-            self.top_k.unwrap_or(default_params.top_k),
-            self.min_p.unwrap_or(default_params.min_p),
+        let gen_params = crate::models::generation::GenerationParams::from_hf_params(
+            &default_params,
+            self.hf_params.clone(),
         );
         TextGenerationPipeline::new(model, gen_params, device).await
     }
@@ -139,19 +132,15 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             })
             .await?;
 
-        // Start with model-specific defaults
-        let default_params = model.default_generation_params();
+        // Start with model-specific defaults and merge any Hugging Face style overrides
+        let mut default_params = model.default_generation_params();
+        if self.hf_params.seed.is_none() {
+            default_params.seed = rand::random::<u64>();
+        }
 
-        // Override with any user-specified values
-        let gen_params = crate::models::generation::GenerationParams::new(
-            self.temperature.unwrap_or(default_params.temperature),
-            self.repeat_penalty.unwrap_or(default_params.repeat_penalty),
-            self.repeat_last_n.unwrap_or(default_params.repeat_last_n),
-            self.seed.unwrap_or_else(rand::random::<u64>),
-            self.max_len.unwrap_or(default_params.max_len),
-            self.top_p.unwrap_or(default_params.top_p),
-            self.top_k.unwrap_or(default_params.top_k),
-            self.min_p.unwrap_or(default_params.min_p),
+        let gen_params = crate::models::generation::GenerationParams::from_hf_params(
+            &default_params,
+            self.hf_params.clone(),
         );
 
         let mut builder = XmlParserBuilder::new();

@@ -63,9 +63,11 @@ pub trait TextGenerationModel {
             repeat_last_n: 64,
             seed: 42,
             max_len: 1024,
-            top_p: 1.0,
-            top_k: 0,
-            min_p: 0.0,
+            sampling: crate::models::generation::params::SamplingParams {
+                top_p: Some(1.0),
+                top_k: None,
+                min_p: None,
+            },
         }
     }
 }
