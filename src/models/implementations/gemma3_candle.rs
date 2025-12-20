@@ -106,12 +106,12 @@ pub struct Gemma3Model {
     generation_config: crate::core::GenerationConfig,
     chat_template_env: Arc<Environment<'static>>,
     info: ModelInfo,
+    repo_id: String,
 }
 
 impl Gemma3Model {
-    async fn load_chat_template_env() -> anyhow::Result<Arc<Environment<'static>>> {
-        let tokenizer_config_loader =
-            HfLoader::new("google/gemma-3-1b-it", "tokenizer_config.json");
+    async fn load_chat_template_env(repo_id: &str) -> anyhow::Result<Arc<Environment<'static>>> {
+        let tokenizer_config_loader = HfLoader::new(repo_id, "tokenizer_config.json");
 
         let tokenizer_config_path = tokenizer_config_loader.load().await?;
         let tokenizer_config_content = std::fs::read_to_string(tokenizer_config_path)?;
@@ -132,6 +132,8 @@ impl Gemma3Model {
         reader: &mut R,
         device: &Device,
     ) -> anyhow::Result<Self> {
+        const DEFAULT_REPO_ID: &str = "google/gemma-3-1b-it";
+
         let content = gguf_file::Content::read(reader)?;
         let info = parse_metadata(&content, device)?;
         let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
@@ -139,16 +141,17 @@ impl Gemma3Model {
         )?);
 
         let generation_config =
-            GenerationConfigLoader::new("google/gemma-3-1b-it", "generation_config.json")
+            GenerationConfigLoader::new(DEFAULT_REPO_ID, "generation_config.json")
                 .load()
                 .await?;
-        let chat_template_env = Self::load_chat_template_env().await?;
+        let chat_template_env = Self::load_chat_template_env(DEFAULT_REPO_ID).await?;
 
         Ok(Self {
             weights,
             generation_config,
             chat_template_env,
             info,
+            repo_id: DEFAULT_REPO_ID.to_string(),
         })
     }
 
@@ -161,22 +164,22 @@ impl Gemma3Model {
             content, &mut file, device,
         )?);
 
-        let generation_config =
-            GenerationConfigLoader::new("google/gemma-3-1b-it", "generation_config.json")
-                .load()
-                .await?;
-        let chat_template_env = Self::load_chat_template_env().await?;
+        let generation_config = GenerationConfigLoader::new(&repo_id, "generation_config.json")
+            .load()
+            .await?;
+        let chat_template_env = Self::load_chat_template_env(&repo_id).await?;
 
         Ok(Self {
             weights,
             generation_config,
             chat_template_env,
             info,
+            repo_id,
         })
     }
 
     pub async fn get_tokenizer(&self) -> anyhow::Result<Tokenizer> {
-        let tokenizer_loader = TokenizerLoader::new("google/gemma-3-1b-it", "tokenizer.json");
+        let tokenizer_loader = TokenizerLoader::new(&self.repo_id, "tokenizer.json");
         tokenizer_loader.load().await
     }
 
