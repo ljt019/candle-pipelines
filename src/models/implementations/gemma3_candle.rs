@@ -25,6 +25,15 @@ pub enum Gemma3Size {
 }
 
 impl Gemma3Size {
+    pub fn config_repo_id(&self) -> &str {
+        match self {
+            Gemma3Size::Size1B => "google/gemma-3-1b-it",
+            Gemma3Size::Size4B => "google/gemma-3-4b-it",
+            Gemma3Size::Size12B => "google/gemma-3-12b-it",
+            Gemma3Size::Size27B => "google/gemma-3-27b-it",
+        }
+    }
+
     pub fn to_id(&self) -> (String, String) {
         match self {
             Gemma3Size::Size1B => (
@@ -164,17 +173,20 @@ impl Gemma3Model {
             content, &mut file, device,
         )?);
 
-        let generation_config = GenerationConfigLoader::new(&repo_id, "generation_config.json")
-            .load()
-            .await?;
-        let chat_template_env = Self::load_chat_template_env(&repo_id).await?;
+        let config_repo_id = size.config_repo_id();
+
+        let generation_config =
+            GenerationConfigLoader::new(config_repo_id, "generation_config.json")
+                .load()
+                .await?;
+        let chat_template_env = Self::load_chat_template_env(config_repo_id).await?;
 
         Ok(Self {
             weights,
             generation_config,
             chat_template_env,
             info,
-            repo_id,
+            repo_id: config_repo_id.to_string(),
         })
     }
 
