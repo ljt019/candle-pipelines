@@ -121,9 +121,9 @@ fn apply_top_k(prs: &mut [f32], top_k: usize) {
     }
 
     let mut argsort_indices = (0..prs.len()).collect::<Vec<_>>();
-    let (indices, _, _) =
-        argsort_indices.select_nth_unstable_by(top_k, |&i, &j| prs[j].total_cmp(&prs[i]));
-    for index in indices.iter().copied().skip(top_k) {
+    argsort_indices.sort_unstable_by(|&i, &j| prs[j].total_cmp(&prs[i]));
+
+    for index in argsort_indices.into_iter().skip(top_k) {
         prs[index] = 0.0;
     }
 }
@@ -181,5 +181,13 @@ mod tests {
         apply_min_p(&mut prs, 0.8);
 
         assert_eq!(prs, vec![0.4, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn top_k_zeros_out_non_top_values() {
+        let mut prs = vec![0.1f32, 0.5, 0.2, 0.05, 0.15];
+        apply_top_k(&mut prs, 3);
+
+        assert_eq!(prs, vec![0.0, 0.5, 0.2, 0.0, 0.15]);
     }
 }
