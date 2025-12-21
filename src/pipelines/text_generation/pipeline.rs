@@ -7,6 +7,7 @@ use super::model::{LanguageModelContext, ToggleableReasoning};
 use super::params::GenerationParams;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
 use async_stream::try_stream;
+use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -428,9 +429,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
             impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
         >,
     > {
-        use async_stream::try_stream;
-        use futures::StreamExt;
-
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
             anyhow::bail!("No tools registered. Call register_tools() first.");

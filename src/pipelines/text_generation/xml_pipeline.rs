@@ -7,6 +7,7 @@ use super::pipeline::Input;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
 use async_stream::stream;
 use futures::Stream;
+use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -187,9 +188,6 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
     where
         M: Send + 'a,
     {
-        use async_stream::stream;
-        use futures::StreamExt;
-
         let inner = self.base.token_stream(tokens);
 
         self.xml_parser.reset();
@@ -404,9 +402,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
             impl Stream<Item = Event> + Send + 'a,
         >,
     > {
-        use async_stream::stream;
-        use futures::StreamExt;
-
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
             anyhow::bail!("No tools registered. Call register_tools() first.");
