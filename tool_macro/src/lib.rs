@@ -99,24 +99,6 @@ fn returns_result(output: &ReturnType) -> bool {
     false
 }
 
-/// Very small type-name mapper.
-fn type_to_json_type(ty: &Type) -> String {
-    if let Type::Path(tp) = ty {
-        if let Some(ident) = tp.path.get_ident() {
-            let name = ident.to_string();
-            return match name.as_str() {
-                "String" | "str" => "string".to_string(),
-                "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "usize" | "isize" => {
-                    "number".to_string()
-                }
-                "bool" => "boolean".to_string(),
-                _ => "object".to_string(),
-            };
-        }
-    }
-    "object".to_string()
-}
-
 /// Attribute macro `#[tool]` that turns a nice Rust function into a `Tool`.
 ///
 /// Example:
@@ -149,6 +131,8 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
     let fn_name_str = fn_name_ident.to_string();
     let wrapper_name = format_ident!("__{}_tool_wrapper", fn_name_ident);
     let tool_builder_name = format_ident!("__{}_tool_builder", fn_name_ident);
+    let params_struct_name = format_ident!("__{}_ToolParams", fn_name_ident);
+    let schema_fn_name = format_ident!("__{}_tool_schema", fn_name_ident);
 
     // Doc comments become description.
     let description = extract_doc(&input_fn.attrs);
@@ -157,36 +141,18 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
     let is_result = returns_result(&input_fn.sig.output);
 
     // Gather parameter information.
-    let mut schema_kv_pairs = Vec::new();
-    let mut extraction_stmts = Vec::new();
-    let mut call_args = Vec::new();
+    let mut param_fields = Vec::new();
+    let mut param_idents = Vec::new();
 
     // Traverse function arguments.
     for arg in input_fn.sig.inputs.iter() {
         if let FnArg::Typed(pat_type) = arg {
             if let Pat::Ident(pat_ident) = &*pat_type.pat {
                 let param_name = &pat_ident.ident;
-                let param_name_str = param_name.to_string();
-
                 let ty = &*pat_type.ty;
-                let json_type_str = type_to_json_type(ty);
 
-                // Build the schema key-value pair
-                schema_kv_pairs.push(quote! {
-                    parameters.insert(#param_name_str.to_string(), #json_type_str.to_string());
-                });
-
-                // Extract the parameter from the HashMap at runtime
-                extraction_stmts.push(quote! {
-                    let #param_name: #ty = parameters
-                        .remove(#param_name_str)
-                        .expect("Missing parameter for tool call")
-                        .parse()
-                        .expect("Failed to parse parameter for tool call");
-                });
-
-                // Pass it to the original function
-                call_args.push(quote! { #param_name });
+                param_fields.push(quote! { pub #param_name: #ty });
+                param_idents.push(quote! { #param_name });
             }
         }
     }
@@ -194,9 +160,11 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
     // Generate different wrapper logic based on return type
     let wrapper_body = if is_result {
         quote! {
-            #( #extraction_stmts )*
+            let parsed: #params_struct_name = serde_json::from_value(parameters)
+                .map_err(|e| transformers::pipelines::text_generation::ToolError::Format(e.to_string()))?;
+            let #params_struct_name { #( #param_idents ),* } = parsed;
             use transformers::pipelines::text_generation::ToolError;
-            let result = #fn_name_ident( #(#call_args),* );
+            let result = #fn_name_ident( #(#param_idents),* );
 
             // Convert the result to the expected type
             match result {
@@ -206,8 +174,10 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     } else {
         quote! {
-            #( #extraction_stmts )*
-            let result = #fn_name_ident( #(#call_args),* );
+            let parsed: #params_struct_name = serde_json::from_value(parameters)
+                .map_err(|e| transformers::pipelines::text_generation::ToolError::Format(e.to_string()))?;
+            let #params_struct_name { #( #param_idents ),* } = parsed;
+            let result = #fn_name_ident( #(#param_idents),* );
             Ok(result)
         }
     };
@@ -217,22 +187,32 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         // Keep the original function as-is
         #input_fn
 
+        #[doc(hidden)]
+        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        struct #params_struct_name {
+            #( #param_fields ),*
+        }
+
         // Automatically generated wrapper that matches the `Tool` function signature.
         #[doc(hidden)]
-        fn #wrapper_name(mut parameters: std::collections::HashMap<String, String>) -> Result<String, transformers::pipelines::text_generation::ToolError> {
+        fn #wrapper_name(parameters: serde_json::Value) -> Result<String, transformers::pipelines::text_generation::ToolError> {
             #wrapper_body
+        }
+
+        #[doc(hidden)]
+        fn #schema_fn_name() -> schemars::schema::RootSchema {
+            schemars::schema_for!(#params_struct_name)
         }
 
         // Hidden function used by the tools! macro
         #[doc(hidden)]
         pub fn #tool_builder_name() -> transformers::pipelines::text_generation::Tool {
-            let mut parameters = std::collections::HashMap::new();
-            #( #schema_kv_pairs )*
+            let schema = #schema_fn_name();
 
             transformers::pipelines::text_generation::Tool::new(
                 #fn_name_str.to_string(),
                 #description.to_string(),
-                parameters,
+                schema,
                 #wrapper_name,
                 #error_strategy,
                 #max_retries,

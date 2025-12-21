@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use thiserror::Error;
 
 /// Error type returned by tool functions.
@@ -36,18 +35,18 @@ pub trait ToolCalling {
     fn call_tool(
         &mut self,
         tool_name: String,
-        parameters: HashMap<String, String>,
+        parameters: serde_json::Value,
     ) -> Result<String, ToolError>;
 }
 
 #[derive(Clone, serde::Serialize)]
-#[allow(clippy::type_complexity)]
 pub struct Tool {
     pub(crate) name: String,
     pub(crate) description: String,
-    pub(crate) parameters: HashMap<String, String>,
+    #[serde(rename = "parameters")]
+    pub(crate) schema: schemars::schema::RootSchema,
     #[serde(skip_serializing)]
-    pub(crate) function: fn(parameters: HashMap<String, String>) -> Result<String, ToolError>,
+    pub(crate) function: fn(parameters: serde_json::Value) -> Result<String, ToolError>,
     #[serde(skip_serializing)]
     pub(crate) error_strategy: ErrorStrategy,
     #[serde(skip_serializing)]
@@ -59,15 +58,15 @@ impl Tool {
     pub fn new(
         name: String,
         description: String,
-        parameters: HashMap<String, String>,
-        function: fn(parameters: HashMap<String, String>) -> Result<String, ToolError>,
+        schema: schemars::schema::RootSchema,
+        function: fn(parameters: serde_json::Value) -> Result<String, ToolError>,
         error_strategy: ErrorStrategy,
         max_retries: u32,
     ) -> Self {
         Self {
             name,
             description,
-            parameters,
+            schema,
             function,
             error_strategy,
             max_retries,
@@ -80,13 +79,14 @@ impl Tool {
     }
 
     /// Execute the tool with the given parameters, returning its result.
-    pub fn call(&self, parameters: HashMap<String, String>) -> Result<String, ToolError> {
+    pub fn call(&self, parameters: serde_json::Value) -> Result<String, ToolError> {
+        self.validate(&parameters)?;
         (self.function)(parameters)
     }
 
     /// Get a reference to the declared parameters schema.
-    pub fn parameters(&self) -> &HashMap<String, String> {
-        &self.parameters
+    pub fn schema(&self) -> &schemars::schema::RootSchema {
+        &self.schema
     }
 
     /// Get the description of the tool.
@@ -102,6 +102,30 @@ impl Tool {
     /// Get the maximum number of retries for this tool.
     pub fn max_retries(&self) -> u32 {
         self.max_retries
+    }
+
+    /// Validate a parameters value against the tool schema.
+    pub fn validate(&self, params: &serde_json::Value) -> Result<(), ToolError> {
+        let schema = serde_json::to_value(&self.schema)
+            .map_err(|e| ToolError::Format(format!("schema serialization failed: {e}")))?;
+        let compiled = jsonschema::JSONSchema::options()
+            .with_draft(jsonschema::Draft::Draft7)
+            .compile(&schema)
+            .map_err(|e| ToolError::Format(format!("invalid schema: {e}")))?;
+
+        let validation_result = compiled.validate(params).map_err(|errors| {
+            errors
+                .map(|error| error.to_string())
+                .collect::<Vec<String>>()
+        });
+
+        match validation_result {
+            Ok(_) => Ok(()),
+            Err(messages) => {
+                let error_msg = messages.join(", ");
+                Err(ToolError::Format(error_msg))
+            }
+        }
     }
 }
 

@@ -522,7 +522,7 @@ impl ToolCalling for Qwen3Model {
     fn call_tool(
         &mut self,
         tool_name: String,
-        parameters: std::collections::HashMap<String, String>,
+        parameters: serde_json::Value,
     ) -> std::result::Result<String, ToolError> {
         if let Some(tool) = self.tools.iter().find(|t| t.name() == tool_name) {
             tool.call(parameters)
