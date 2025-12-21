@@ -22,7 +22,6 @@ pub trait ToolCalling {
     fn unregister_tool(&mut self, name: &str) -> Result<()>;
     fn clear_tools(&mut self) -> Result<()>;
     fn registered_tools(&self) -> Vec<Tool>;
-    fn call_tool(&mut self, tool_name: String, parameters: serde_json::Value) -> ToolFuture;
 }
 
 /// Future type returned by tool functions.
