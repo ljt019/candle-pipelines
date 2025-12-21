@@ -1,5 +1,6 @@
 use super::model::{LanguageModelContext, TextGenerationModel};
 use super::params::{apply_repeat_penalty, initialize_logits_processor, GenerationParams};
+use super::stats::GenerationStats;
 use candle_core::Tensor;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -14,6 +15,7 @@ pub struct BasePipeline<M: TextGenerationModel> {
     pub device: candle_core::Device,
     pub last_processed_tokens: Arc<Mutex<Vec<u32>>>,
     pub special_strings: std::collections::HashSet<String>,
+    pub last_generation_stats: std::sync::Arc<std::sync::Mutex<Option<GenerationStats>>>,
 }
 
 impl<M: TextGenerationModel> BasePipeline<M> {
@@ -46,12 +48,17 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             device,
             last_processed_tokens: Arc::new(Mutex::new(Vec::new())),
             special_strings,
+            last_generation_stats: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
     /// Get the current position in the context (number of cached tokens)
     pub async fn context_position(&self) -> usize {
         self.context.lock().await.position()
+    }
+
+    pub fn last_generation_stats(&self) -> Option<GenerationStats> {
+        self.last_generation_stats.lock().unwrap().clone()
     }
 
     pub async fn set_generation_params(&self, params: GenerationParams) {
@@ -65,6 +72,23 @@ impl<M: TextGenerationModel> BasePipeline<M> {
     }
 
     pub async fn completion_from_tokens(&self, input_tokens: &[u32]) -> anyhow::Result<String> {
+        let (output, _) = self.completion_from_tokens_with_stats(input_tokens).await?;
+        Ok(output)
+    }
+
+    pub async fn completion_from_tokens_with_stats(
+        &self,
+        input_tokens: &[u32],
+    ) -> anyhow::Result<(String, GenerationStats)> {
+        self.completion_from_tokens_with_prompt_stats(input_tokens, input_tokens.len())
+            .await
+    }
+
+    pub async fn completion_from_tokens_with_prompt_stats(
+        &self,
+        input_tokens: &[u32],
+        prompt_token_count: usize,
+    ) -> anyhow::Result<(String, GenerationStats)> {
         const CHUNK_SIZE: usize = 64; // Must be <= initial kv cache size
 
         let params = self.gen_params.lock().await.clone();
@@ -72,6 +96,8 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         let mut logits_processor = initialize_logits_processor(&params, params.seed);
 
         let mut generated_tokens: Vec<u32> = Vec::with_capacity(params.max_len);
+        let mut stats = GenerationStats::new();
+        stats.set_prompt_tokens(prompt_token_count);
 
         // Feed the initial prompt in manageable chunks to allow the KV cache to grow.
         let mut idx = 0;
@@ -92,6 +118,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         // Safety: there is always at least one chunk, so last_logits is Some
         let mut next_token = logits_processor.sample(&last_logits.expect("missing logits"))?;
         generated_tokens.push(next_token);
+        stats.record_token();
 
         // Generate autoregressively
         let eos_tokens = self.model.lock().await.get_eos_tokens();
@@ -121,6 +148,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
             next_token = logits_processor.sample(&logits)?;
             generated_tokens.push(next_token);
+            stats.record_token();
         }
 
         // Filter out EOS tokens before decoding
@@ -136,14 +164,37 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             .decode(&filtered_tokens, /*skip_special_tokens=*/ true)
             .expect("token decode failed");
 
-        Ok(generated_tokens_str)
+        stats.finalize();
+        self.last_generation_stats
+            .lock()
+            .unwrap()
+            .replace(stats.clone());
+
+        Ok((generated_tokens_str, stats))
     }
 
     /// Stream tokens from the model given input tokens.
     pub fn token_stream<'a>(
         &'a self,
         input_tokens: Vec<u32>,
-    ) -> impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a
+    ) -> (
+        std::sync::Arc<std::sync::Mutex<GenerationStats>>,
+        impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
+    )
+    where
+        M: 'a + Send,
+    {
+        self.token_stream_with_prompt_count(input_tokens, None)
+    }
+
+    pub fn token_stream_with_prompt_count<'a>(
+        &'a self,
+        input_tokens: Vec<u32>,
+        prompt_token_count: Option<usize>,
+    ) -> (
+        std::sync::Arc<std::sync::Mutex<GenerationStats>>,
+        impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
+    )
     where
         M: 'a + Send,
     {
@@ -153,8 +204,17 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         let tokenizer = self.model_tokenizer.clone();
         let context = std::sync::Arc::clone(&self.context);
         let gen_params = std::sync::Arc::clone(&self.gen_params);
+        let last_stats = std::sync::Arc::clone(&self.last_generation_stats);
 
-        async_stream::try_stream! {
+        let stats = std::sync::Arc::new(std::sync::Mutex::new(GenerationStats::new()));
+        stats
+            .lock()
+            .unwrap()
+            .set_prompt_tokens(prompt_token_count.unwrap_or(input_tokens.len()));
+
+        let stats_clone = std::sync::Arc::clone(&stats);
+
+        let stream = async_stream::try_stream! {
             let params = gen_params.lock().await.clone();
             let eos_tokens = model.lock().await.get_eos_tokens();
             if eos_tokens.is_empty() {
@@ -184,9 +244,9 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
             let mut dec_full = tokenizer.decode_stream(false);
 
-            let mut next_token =
-                logits_processor.sample(&last_logits.expect("missing logits"))?;
+            let mut next_token = logits_processor.sample(&last_logits.expect("missing logits"))?;
             generated.push(next_token);
+            stats_clone.lock().unwrap().record_token();
 
             if !eos_tokens.contains(&next_token) {
                 if let Some(chunk) = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))? {
@@ -219,6 +279,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
                 next_token = logits_processor.sample(&logits)?;
                 generated.push(next_token);
+                stats_clone.lock().unwrap().record_token();
 
                 if !eos_tokens.contains(&next_token) {
                     if let Some(chunk) = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))? {
@@ -228,6 +289,14 @@ impl<M: TextGenerationModel> BasePipeline<M> {
                     let _ = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))?;
                 }
             }
-        }
+
+            {
+                let mut stats_guard = stats_clone.lock().unwrap();
+                stats_guard.finalize();
+                last_stats.lock().unwrap().replace(stats_guard.clone());
+            }
+        };
+
+        (stats, stream)
     }
 }
