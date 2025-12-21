@@ -188,6 +188,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         #input_fn
 
         #[doc(hidden)]
+        #[allow(non_camel_case_types)]
         #[derive(serde::Deserialize, schemars::JsonSchema)]
         struct #params_struct_name {
             #( #param_fields ),*
