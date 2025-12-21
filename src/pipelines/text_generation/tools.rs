@@ -90,8 +90,9 @@ impl Tool {
 
     /// Validate a parameters value against the tool schema.
     pub fn validate(&self, params: &serde_json::Value) -> Result<()> {
-        let schema = serde_json::to_value(&self.schema)
-            .map_err(|e| TransformersError::ToolFormat(format!("schema serialization failed: {e}")))?;
+        let schema = serde_json::to_value(&self.schema).map_err(|e| {
+            TransformersError::ToolFormat(format!("schema serialization failed: {e}"))
+        })?;
         let compiled = jsonschema::JSONSchema::options()
             .with_draft(jsonschema::Draft::Draft7)
             .compile(&schema)
