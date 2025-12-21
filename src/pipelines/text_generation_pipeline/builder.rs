@@ -1,7 +1,6 @@
 use crate::core::{global_cache, ModelOptions};
-use crate::models::{
-    generation::HfGenerationParams, Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size,
-};
+use crate::models::generation::GenerationParams;
+use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
 use crate::pipelines::utils::{build_cache_key, DeviceRequest, DeviceSelectable};
 
 use super::model::TextGenerationModel;
@@ -10,14 +9,9 @@ use super::pipeline::TextGenerationPipeline;
 use super::xml_pipeline::XmlGenerationPipeline;
 
 /// Builder for text generation pipelines.
-///
-/// Note: This builder doesn't use the shared `BasePipelineBuilder` trait because
-/// it has a more complex building pattern with many configuration options
-/// (temperature, top_p, etc.), async model creation, and different caching logic.
-/// The shared trait is designed for simpler builders with just options and device.
 pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
     model_options: M::Options,
-    hf_params: HfGenerationParams,
+    gen_params: GenerationParams,
     device_request: DeviceRequest,
 }
 
@@ -25,18 +19,18 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     pub fn new(options: M::Options) -> Self {
         Self {
             model_options: options,
-            hf_params: HfGenerationParams::default(),
+            gen_params: GenerationParams::default(),
             device_request: DeviceRequest::Default,
         }
     }
 
     pub fn temperature(mut self, temperature: f64) -> Self {
-        self.hf_params.temperature = Some(temperature);
+        self.gen_params.temperature = temperature;
         self
     }
 
     pub fn repeat_penalty(mut self, repeat_penalty: f32) -> Self {
-        self.hf_params.repetition_penalty = Some(repeat_penalty);
+        self.gen_params.repeat_penalty = repeat_penalty;
         self
     }
 
@@ -45,37 +39,37 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     }
 
     pub fn repeat_last_n(mut self, repeat_last_n: usize) -> Self {
-        self.hf_params.repeat_last_n = Some(repeat_last_n);
+        self.gen_params.repeat_last_n = repeat_last_n;
         self
     }
 
     pub fn seed(mut self, seed: u64) -> Self {
-        self.hf_params.seed = Some(seed);
+        self.gen_params.seed = seed;
         self
     }
 
     pub fn max_len(mut self, max_len: usize) -> Self {
-        self.hf_params.max_new_tokens = Some(max_len);
+        self.gen_params.max_len = max_len;
         self
     }
 
     pub fn max_new_tokens(mut self, max_new_tokens: usize) -> Self {
-        self.hf_params.max_new_tokens = Some(max_new_tokens);
+        self.gen_params.max_len = max_new_tokens;
         self
     }
 
     pub fn top_p(mut self, top_p: f64) -> Self {
-        self.hf_params.top_p = Some(top_p.clamp(0.0, 1.0));
+        self.gen_params.top_p = Some(top_p.clamp(0.0, 1.0));
         self
     }
 
     pub fn top_k(mut self, top_k: usize) -> Self {
-        self.hf_params.top_k = Some(top_k);
+        self.gen_params.top_k = Some(top_k);
         self
     }
 
     pub fn min_p(mut self, min_p: f64) -> Self {
-        self.hf_params.min_p = Some(min_p.clamp(0.0, 1.0));
+        self.gen_params.min_p = Some(min_p.clamp(0.0, 1.0));
         self
     }
 
@@ -84,13 +78,9 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         M: Clone + Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
     {
-        // Resolve device first so model weights and inference tensors live on the same device.
         let device = self.device_request.resolve()?;
-
-        // Include device in the cache key so CPU/GPU variants don't get mixed.
         let cache_key = build_cache_key(&self.model_options, &device);
 
-        // Always use the global cache to share models (weights) across pipelines.
         let options = self.model_options.clone();
         let device_for_model = device.clone();
         let model = global_cache()
@@ -99,17 +89,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             })
             .await?;
 
-        // Start with model-specific defaults and merge any Hugging Face style overrides
-        let mut default_params = model.default_generation_params();
-        if self.hf_params.seed.is_none() {
-            default_params.seed = rand::random::<u64>();
-        }
-
-        let gen_params = crate::models::generation::GenerationParams::from_hf_params(
-            &default_params,
-            self.hf_params.clone(),
-        );
-        TextGenerationPipeline::new(model, gen_params, device).await
+        TextGenerationPipeline::new(model, self.gen_params, device).await
     }
 
     pub async fn build_xml(self, tags: &[&str]) -> anyhow::Result<XmlGenerationPipeline<M>>
@@ -117,13 +97,9 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         M: Clone + Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
     {
-        // Resolve device first so model weights and inference tensors live on the same device.
         let device = self.device_request.resolve()?;
-
-        // Include device in the cache key so CPU/GPU variants don't get mixed.
         let cache_key = build_cache_key(&self.model_options, &device);
 
-        // Always use the global cache to share models (weights) across pipelines.
         let options = self.model_options.clone();
         let device_for_model = device.clone();
         let model = global_cache()
@@ -132,23 +108,12 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             })
             .await?;
 
-        // Start with model-specific defaults and merge any Hugging Face style overrides
-        let mut default_params = model.default_generation_params();
-        if self.hf_params.seed.is_none() {
-            default_params.seed = rand::random::<u64>();
-        }
-
-        let gen_params = crate::models::generation::GenerationParams::from_hf_params(
-            &default_params,
-            self.hf_params.clone(),
-        );
-
         let mut builder = XmlParserBuilder::new();
         for tag in tags {
             builder.register_tag(*tag);
         }
         let xml_parser = builder.build();
-        XmlGenerationPipeline::new(model, gen_params, xml_parser, device).await
+        XmlGenerationPipeline::new(model, self.gen_params, xml_parser, device).await
     }
 }
 

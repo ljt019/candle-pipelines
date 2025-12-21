@@ -50,7 +50,8 @@ async fn text_generation_params_update() -> anyhow::Result<()> {
 
     let short = pipeline.completion("Rust is a").await?;
 
-    let new_params = GenerationParams::new(0.7, 1.0, 64, 42, 8, 1.0, 0, 0.0);
+    let mut new_params = GenerationParams::default();
+    new_params.max_len = 8;
     pipeline.set_generation_params(new_params).await;
 
     let longer = pipeline.completion("Rust is a").await?;

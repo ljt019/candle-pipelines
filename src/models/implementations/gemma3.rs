@@ -334,13 +334,11 @@ impl TextGenerationModel for Gemma3Model {
             temperature: self.generation_config.temperature.unwrap_or(1.0),
             repeat_penalty: self.generation_config.repeat_penalty.unwrap_or(1.15),
             repeat_last_n: self.generation_config.repeat_last_n.unwrap_or(64),
-            seed: 42,
+            seed: rand::random(),
             max_len: 8192,
-            sampling: crate::models::generation::params::SamplingParams {
-                top_p: Some(self.generation_config.top_p.unwrap_or(0.95)),
-                top_k: Some(self.generation_config.top_k.unwrap_or(64) as usize),
-                min_p: Some(self.generation_config.min_p.unwrap_or(0.0)).filter(|v| *v > 0.0),
-            },
+            top_p: Some(self.generation_config.top_p.unwrap_or(0.95)),
+            top_k: Some(self.generation_config.top_k.unwrap_or(64) as usize),
+            min_p: Some(self.generation_config.min_p.unwrap_or(0.0)).filter(|v| *v > 0.0),
         }
     }
 }

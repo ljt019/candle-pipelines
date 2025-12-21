@@ -9,6 +9,7 @@ async fn main() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(1024)
         .cuda_device(0)
+        .min_p(0.1)
         .build()
         .await?;
 
@@ -22,6 +23,7 @@ async fn main() -> Result<()> {
         std::io::stdout().flush().unwrap();
     }
 
+    /*
     // Also supports messages obviously
     let messages = vec![
         Message::system("You are a helpful pirate assistant."),
@@ -35,6 +37,7 @@ async fn main() -> Result<()> {
         print!("{}", tok?);
         std::io::stdout().flush().unwrap();
     }
+    */
 
     Ok(())
 }

@@ -55,20 +55,8 @@ pub trait TextGenerationModel {
     fn clear_context(&self, context: &mut Self::Context) -> anyhow::Result<()>;
 
     /// Get the default generation parameters for this model.
-    /// Models can override this to provide model-specific defaults.
     fn default_generation_params(&self) -> crate::models::generation::GenerationParams {
-        crate::models::generation::GenerationParams {
-            temperature: 0.7,
-            repeat_penalty: 1.0,
-            repeat_last_n: 64,
-            seed: 42,
-            max_len: 1024,
-            sampling: crate::models::generation::params::SamplingParams {
-                top_p: Some(1.0),
-                top_k: None,
-                min_p: None,
-            },
-        }
+        crate::models::generation::GenerationParams::default()
     }
 }
 
