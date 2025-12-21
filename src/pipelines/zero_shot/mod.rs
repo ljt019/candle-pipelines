@@ -19,12 +19,10 @@
 //! use transformers::pipelines::utils::BasePipelineBuilder;
 //! use transformers::pipelines::zero_shot::*;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<()> {
+//! fn main() -> Result<()> {
 //!     // Create a zero-shot classification pipeline
 //!     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
-//!         .build()
-//!         .await?;
+//!         .build()?;
 //!
 //!     // Classify text into arbitrary categories
 //!     let text = "The movie was absolutely fantastic!";

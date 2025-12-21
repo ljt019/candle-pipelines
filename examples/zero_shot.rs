@@ -2,13 +2,11 @@ use anyhow::Result;
 use transformers::pipelines::utils::BasePipelineBuilder;
 use transformers::pipelines::zero_shot::*;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     println!("Building pipeline...");
 
-    let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
-        .build()
-        .await?;
+    let pipeline =
+        ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     println!("Pipeline built successfully.");
 

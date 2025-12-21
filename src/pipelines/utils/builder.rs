@@ -62,8 +62,7 @@ where
     /// 3. Get or create model from global cache
     /// 4. Get tokenizer
     /// 5. Construct final pipeline
-    #[allow(async_fn_in_trait)]
-    async fn build(self) -> Result<Self::Pipeline> {
+    fn build(self) -> Result<Self::Pipeline> {
         // Resolve the device request
         let device = self.device_request().clone().resolve()?;
 
@@ -71,11 +70,9 @@ where
         let key = build_cache_key(self.options(), &device);
 
         // Get or create model from cache
-        let model = global_cache()
-            .get_or_create(&key, || {
-                Self::create_model(self.options().clone(), device.clone())
-            })
-            .await?;
+        let model = global_cache().get_or_create(&key, || {
+            Self::create_model(self.options().clone(), device.clone())
+        })?;
 
         // Get tokenizer
         let tokenizer = Self::get_tokenizer(self.options().clone())?;

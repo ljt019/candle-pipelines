@@ -18,12 +18,10 @@
 //! use transformers::pipelines::sentiment::*;
 //! use transformers::pipelines::utils::BasePipelineBuilder;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<()> {
+//! fn main() -> Result<()> {
 //!     // Create a sentiment analysis pipeline
 //!     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
-//!         .build()
-//!         .await?;
+//!         .build()?;
 //!
 //!     // Analyze sentiment
 //!     let result = pipeline.predict("I love this product!")?;

@@ -168,6 +168,140 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         Ok(out)
     }
 
+    /// True batched inference: tokenize all inputs, pad, run single forward pass.
+    fn predict_top_k_batch(
+        &self,
+        tokenizer: &Tokenizer,
+        texts: &[&str],
+        k: usize,
+    ) -> AnyhowResult<Vec<AnyhowResult<Vec<FillMaskPrediction>>>> {
+        if texts.is_empty() || k == 0 {
+            return Ok(texts.iter().map(|_| Ok(vec![])).collect());
+        }
+
+        let mask_id = tokenizer.token_to_id("[MASK]").unwrap_or(103);
+        let pad_token_id = tokenizer
+            .get_padding()
+            .map(|p| p.pad_id)
+            .or_else(|| tokenizer.token_to_id("<pad>"))
+            .or_else(|| tokenizer.token_to_id("[PAD]"))
+            .unwrap_or(0);
+
+        // Tokenize all inputs and find mask positions
+        let mut encodings = Vec::with_capacity(texts.len());
+        let mut mask_indices = Vec::with_capacity(texts.len());
+        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+
+        for (i, text) in texts.iter().enumerate() {
+            match tokenizer.encode(*text, true) {
+                Ok(encoding) => {
+                    let mask_idx = encoding.get_ids().iter().position(|&id| id == mask_id);
+                    match mask_idx {
+                        Some(idx) => {
+                            mask_indices.push(idx);
+                            encodings.push(Some(encoding));
+                        }
+                        None => {
+                            error_messages[i] = Some("No [MASK] token found in input".to_string());
+                            mask_indices.push(0);
+                            encodings.push(None);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error_messages[i] = Some(format!("Tokenization error: {e}"));
+                    mask_indices.push(0);
+                    encodings.push(None);
+                }
+            }
+        }
+
+        // Find valid encodings for batching
+        let valid_indices: Vec<usize> = encodings
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| e.as_ref().map(|_| i))
+            .collect();
+
+        if valid_indices.is_empty() {
+            return Ok(error_messages
+                .into_iter()
+                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .collect());
+        }
+
+        // Pad and batch valid encodings
+        let valid_encodings: Vec<_> = valid_indices
+            .iter()
+            .map(|&i| encodings[i].as_ref().unwrap())
+            .collect();
+        let max_len = valid_encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+
+        let mut all_token_ids: Vec<u32> = Vec::new();
+        let mut all_attention_masks: Vec<u32> = Vec::new();
+
+        for encoding in &valid_encodings {
+            let mut token_ids = encoding.get_ids().to_vec();
+            let mut attention_mask = encoding.get_attention_mask().to_vec();
+            token_ids.resize(max_len, pad_token_id);
+            attention_mask.resize(max_len, 0);
+            all_token_ids.extend(token_ids);
+            all_attention_masks.extend(attention_mask);
+        }
+
+        let batch_size = valid_indices.len();
+        let input_ids = Tensor::from_vec(all_token_ids, (batch_size, max_len), &self.device)?;
+        let attention_mask =
+            Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
+
+        // Single forward pass for entire batch
+        let logits = self.model.forward(&input_ids, &attention_mask)?;
+
+        // Extract predictions for each item
+        let mut results: Vec<AnyhowResult<Vec<FillMaskPrediction>>> = error_messages
+            .into_iter()
+            .map(|e| match e {
+                Some(msg) => Err(E::msg(msg).into()),
+                None => Ok(vec![]), // Placeholder, will be filled
+            })
+            .collect();
+
+        for (batch_idx, &orig_idx) in valid_indices.iter().enumerate() {
+            let mask_idx = mask_indices[orig_idx];
+            let item_logits = logits.i((batch_idx, mask_idx, ..))?;
+            let probs = softmax(&item_logits, D::Minus1)?;
+            let probs_vec = probs.to_vec1::<f32>()?;
+
+            if probs_vec.is_empty() {
+                results[orig_idx] = Ok(vec![]);
+                continue;
+            }
+
+            let mut idxs: Vec<usize> = (0..probs_vec.len()).collect();
+            idxs.sort_by(|&i, &j| probs_vec[j].total_cmp(&probs_vec[i]));
+            idxs.truncate(k.min(idxs.len()));
+
+            let mut predictions = Vec::with_capacity(idxs.len());
+            for idx in idxs {
+                let token_str = tokenizer
+                    .decode(&[idx as u32], true)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if token_str.is_empty() {
+                    continue;
+                }
+                predictions.push(FillMaskPrediction {
+                    word: token_str,
+                    score: probs_vec[idx],
+                });
+            }
+            results[orig_idx] = Ok(predictions);
+        }
+
+        Ok(results)
+    }
+
     fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
         Self::get_tokenizer(options)
     }
@@ -311,6 +445,149 @@ impl ZeroShotModernBertModel {
         Ok(results)
     }
 
+    /// True batched inference: batch all (text, label) pairs across all texts in single forward pass.
+    fn predict_raw_batch(
+        &self,
+        tokenizer: &Tokenizer,
+        texts: &[&str],
+        candidate_labels: &[&str],
+    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+        if candidate_labels.is_empty() {
+            return Ok(texts.iter().map(|_| Ok(vec![])).collect());
+        }
+
+        let entailment_id = *self
+            .label2id
+            .get("entailment")
+            .ok_or_else(|| E::msg("Config missing 'entailment' in label2id"))?;
+
+        let pad_token_id = tokenizer
+            .get_padding()
+            .map(|p| p.pad_id)
+            .or_else(|| tokenizer.token_to_id("<pad>"))
+            .or_else(|| tokenizer.token_to_id("[PAD]"))
+            .unwrap_or(0);
+
+        let num_labels = candidate_labels.len();
+
+        // Tokenize all (text, label) pairs
+        // Layout: [text0_label0, text0_label1, ..., text1_label0, text1_label1, ...]
+        let mut all_encodings = Vec::with_capacity(texts.len() * num_labels);
+        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+
+        for (text_idx, text) in texts.iter().enumerate() {
+            let mut text_has_error = false;
+            for &label in candidate_labels {
+                if text_has_error {
+                    all_encodings.push(None);
+                    continue;
+                }
+                let hypothesis = format!("This example is {label}.");
+                match tokenizer.encode((*text, hypothesis.as_str()), true) {
+                    Ok(encoding) => all_encodings.push(Some(encoding)),
+                    Err(e) => {
+                        error_messages[text_idx] = Some(format!("Tokenization error: {e}"));
+                        text_has_error = true;
+                        all_encodings.push(None);
+                    }
+                }
+            }
+        }
+
+        // Find valid pairs for batching
+        let valid_pair_indices: Vec<usize> = all_encodings
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| e.as_ref().map(|_| i))
+            .collect();
+
+        if valid_pair_indices.is_empty() {
+            return Ok(error_messages
+                .into_iter()
+                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .collect());
+        }
+
+        // Pad and batch valid encodings
+        let valid_encodings: Vec<_> = valid_pair_indices
+            .iter()
+            .map(|&i| all_encodings[i].as_ref().unwrap())
+            .collect();
+        let max_len = valid_encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+
+        let mut all_token_ids: Vec<u32> = Vec::new();
+        let mut all_attention_masks: Vec<u32> = Vec::new();
+
+        for encoding in &valid_encodings {
+            let mut token_ids = encoding.get_ids().to_vec();
+            let mut attention_mask = encoding.get_attention_mask().to_vec();
+            token_ids.resize(max_len, pad_token_id);
+            attention_mask.resize(max_len, 0);
+            all_token_ids.extend(token_ids);
+            all_attention_masks.extend(attention_mask);
+        }
+
+        let batch_size = valid_pair_indices.len();
+        let input_ids = Tensor::from_vec(all_token_ids, (batch_size, max_len), &self.device)?;
+        let attention_mask =
+            Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
+
+        // Single forward pass for entire batch
+        let logits = self.model.forward(&input_ids, &attention_mask)?;
+        let probabilities = softmax(&logits, D::Minus1)?;
+        let entailment_probs = probabilities
+            .i((.., entailment_id as usize))?
+            .to_vec1::<f32>()?;
+
+        // Map results back to original structure
+        let mut results: Vec<AnyhowResult<Vec<(String, f32)>>> = error_messages
+            .into_iter()
+            .map(|e| match e {
+                Some(msg) => Err(E::msg(msg).into()),
+                None => Ok(vec![]), // Placeholder
+            })
+            .collect();
+
+        // Create a mapping from valid_pair_indices back to (text_idx, label_idx)
+        let mut valid_idx_to_prob: std::collections::HashMap<usize, f32> =
+            std::collections::HashMap::new();
+        for (batch_idx, &pair_idx) in valid_pair_indices.iter().enumerate() {
+            valid_idx_to_prob.insert(pair_idx, entailment_probs[batch_idx]);
+        }
+
+        // Build results for each text
+        for text_idx in 0..texts.len() {
+            if results[text_idx].is_err() {
+                continue;
+            }
+
+            let mut text_results: Vec<(String, f32)> = Vec::with_capacity(num_labels);
+            let mut all_valid = true;
+
+            for (label_idx, &label) in candidate_labels.iter().enumerate() {
+                let pair_idx = text_idx * num_labels + label_idx;
+                if let Some(&prob) = valid_idx_to_prob.get(&pair_idx) {
+                    text_results.push((label.to_string(), prob));
+                } else {
+                    all_valid = false;
+                    break;
+                }
+            }
+
+            if all_valid {
+                text_results
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                results[text_idx] = Ok(text_results);
+            }
+            // If not all_valid, the error was already set
+        }
+
+        Ok(results)
+    }
+
     pub fn get_tokenizer(size: ModernBertSize) -> AnyhowResult<Tokenizer> {
         let repo_id = match size {
             ModernBertSize::Base => "MoritzLaurer/ModernBERT-base-zeroshot-v2.0",
@@ -336,6 +613,32 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
+    /// True batched inference: batch all (text, label) pairs across all texts.
+    fn predict_batch(
+        &self,
+        tokenizer: &Tokenizer,
+        texts: &[&str],
+        candidate_labels: &[&str],
+    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+        let raw_results = self.predict_raw_batch(tokenizer, texts, candidate_labels)?;
+
+        // Normalize each text's results (single-label: probabilities sum to 1)
+        Ok(raw_results
+            .into_iter()
+            .map(|result| {
+                result.map(|mut scores| {
+                    let sum: f32 = scores.iter().map(|(_, p)| p).sum();
+                    if sum > 0.0 {
+                        for (_, p) in scores.iter_mut() {
+                            *p /= sum;
+                        }
+                    }
+                    scores
+                })
+            })
+            .collect())
+    }
+
     fn predict_multi_label(
         &self,
         tokenizer: &Tokenizer,
@@ -343,6 +646,16 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         candidate_labels: &[&str],
     ) -> AnyhowResult<Vec<(String, f32)>> {
         self.predict_raw(tokenizer, text, candidate_labels)
+    }
+
+    /// True batched inference for multi-label: batch all (text, label) pairs.
+    fn predict_multi_label_batch(
+        &self,
+        tokenizer: &Tokenizer,
+        texts: &[&str],
+        candidate_labels: &[&str],
+    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+        self.predict_raw_batch(tokenizer, texts, candidate_labels)
     }
 
     fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
@@ -453,6 +766,117 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         Ok(SentimentResult { label, score })
     }
 
+    /// True batched inference: tokenize all inputs, pad, run single forward pass.
+    fn predict_with_score_batch(
+        &self,
+        tokenizer: &Tokenizer,
+        texts: &[&str],
+    ) -> AnyhowResult<Vec<AnyhowResult<SentimentResult>>> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let pad_token_id = tokenizer
+            .get_padding()
+            .map(|p| p.pad_id)
+            .or_else(|| tokenizer.token_to_id("<pad>"))
+            .or_else(|| tokenizer.token_to_id("[PAD]"))
+            .unwrap_or(0);
+
+        // Tokenize all inputs
+        let mut encodings = Vec::with_capacity(texts.len());
+        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+
+        for (i, text) in texts.iter().enumerate() {
+            match tokenizer.encode(*text, true) {
+                Ok(encoding) => encodings.push(Some(encoding)),
+                Err(e) => {
+                    error_messages[i] = Some(format!("Tokenization error: {e}"));
+                    encodings.push(None);
+                }
+            }
+        }
+
+        // Find valid encodings for batching
+        let valid_indices: Vec<usize> = encodings
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| e.as_ref().map(|_| i))
+            .collect();
+
+        if valid_indices.is_empty() {
+            return Ok(error_messages
+                .into_iter()
+                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .collect());
+        }
+
+        // Pad and batch valid encodings
+        let valid_encodings: Vec<_> = valid_indices
+            .iter()
+            .map(|&i| encodings[i].as_ref().unwrap())
+            .collect();
+        let max_len = valid_encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+
+        let mut all_token_ids: Vec<u32> = Vec::new();
+        let mut all_attention_masks: Vec<u32> = Vec::new();
+
+        for encoding in &valid_encodings {
+            let mut token_ids = encoding.get_ids().to_vec();
+            let mut attention_mask = encoding.get_attention_mask().to_vec();
+            token_ids.resize(max_len, pad_token_id);
+            attention_mask.resize(max_len, 0);
+            all_token_ids.extend(token_ids);
+            all_attention_masks.extend(attention_mask);
+        }
+
+        let batch_size = valid_indices.len();
+        let input_ids = Tensor::from_vec(all_token_ids, (batch_size, max_len), &self.device)?;
+        let attention_mask =
+            Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
+
+        // Single forward pass for entire batch
+        let logits = self.model.forward(&input_ids, &attention_mask)?;
+        let probs = softmax(&logits, D::Minus1)?;
+        let pred_ids = logits.argmax(D::Minus1)?.to_vec1::<u32>()?;
+        let probs_2d = probs.to_vec2::<f32>()?;
+
+        // Extract predictions for each item
+        let mut results: Vec<AnyhowResult<SentimentResult>> = error_messages
+            .into_iter()
+            .map(|e| match e {
+                Some(msg) => Err(E::msg(msg).into()),
+                None => Ok(SentimentResult {
+                    label: String::new(),
+                    score: 0.0,
+                }), // Placeholder
+            })
+            .collect();
+
+        for (batch_idx, &orig_idx) in valid_indices.iter().enumerate() {
+            let pred_id = pred_ids[batch_idx];
+            let score = probs_2d[batch_idx]
+                .get(pred_id as usize)
+                .copied()
+                .unwrap_or(0.0);
+
+            match self.id2label.get(&pred_id.to_string()) {
+                Some(label) => {
+                    results[orig_idx] = Ok(SentimentResult {
+                        label: label.clone(),
+                        score,
+                    });
+                }
+                None => {
+                    results[orig_idx] =
+                        Err(E::msg(format!("Predicted ID '{pred_id}' not in id2label")).into());
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
         Self::get_tokenizer(options)
     }
@@ -505,6 +929,38 @@ struct ClassifierConfigJson {
     label2id: HashMap<String, u32>,
 }
 
+/// Workaround for candle's ClassifierConfig expecting label2id: HashMap<String, String>
+/// when actual HF configs have label2id: HashMap<String, i64>.
+/// We manually inject the correct num_labels.
+fn patch_config_num_labels(config: &mut Config, num_labels: usize) {
+    use candle_transformers::models::modernbert::{ClassifierConfig, ClassifierPooling};
+
+    // If classifier_config is None or has wrong label count, create/update it
+    if config.classifier_config.is_none()
+        || config
+            .classifier_config
+            .as_ref()
+            .map(|c| c.id2label.len())
+            .unwrap_or(0)
+            != num_labels
+    {
+        // Create dummy id2label with correct count
+        let id2label: HashMap<String, String> = (0..num_labels)
+            .map(|i| (i.to_string(), format!("label_{i}")))
+            .collect();
+        let label2id: HashMap<String, String> = id2label
+            .iter()
+            .map(|(k, v)| (v.clone(), k.clone()))
+            .collect();
+
+        config.classifier_config = Some(ClassifierConfig {
+            id2label,
+            label2id,
+            classifier_pooling: ClassifierPooling::default(),
+        });
+    }
+}
+
 fn load_classifier_model(
     repo_id: &str,
     device: &Device,
@@ -518,8 +974,12 @@ fn load_classifier_model(
         .or_else(|_| repo.get("pytorch_model.bin"))?;
 
     let config_str = std::fs::read_to_string(&config_path)?;
-    let config: Config = serde_json::from_str(&config_str)?;
+    let mut config: Config = serde_json::from_str(&config_str)?;
     let class_cfg: ClassifierConfigJson = serde_json::from_str(&config_str)?;
+
+    // Patch config with correct num_labels (workaround for candle's type mismatch)
+    let num_labels = class_cfg.label2id.len().max(class_cfg.id2label.len());
+    patch_config_num_labels(&mut config, num_labels);
 
     let vb = if weights_path.extension().is_some_and(|e| e == "safetensors") {
         unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, device)? }
@@ -543,8 +1003,12 @@ fn load_classifier_model_with_id2label(
         .or_else(|_| repo.get("pytorch_model.bin"))?;
 
     let config_str = std::fs::read_to_string(&config_path)?;
-    let config: Config = serde_json::from_str(&config_str)?;
+    let mut config: Config = serde_json::from_str(&config_str)?;
     let class_cfg: ClassifierConfigJson = serde_json::from_str(&config_str)?;
+
+    // Patch config with correct num_labels (workaround for candle's type mismatch)
+    let num_labels = class_cfg.label2id.len().max(class_cfg.id2label.len());
+    patch_config_num_labels(&mut config, num_labels);
 
     let vb = if weights_path.extension().is_some_and(|e| e == "safetensors") {
         unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, device)? }

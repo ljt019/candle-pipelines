@@ -18,12 +18,10 @@
 //! use transformers::pipelines::fill_mask::*;
 //! use transformers::pipelines::utils::BasePipelineBuilder;
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<()> {
+//! fn main() -> Result<()> {
 //!     // Create a fill-mask pipeline
 //!     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
-//!         .build()
-//!         .await?;
+//!         .build()?;
 //!
 //!     // Fill masked tokens
 //!     let top = pipeline.predict("The capital of France is [MASK].")?;

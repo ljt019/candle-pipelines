@@ -2,8 +2,7 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Trait implemented by model option types to generate a stable cache key.
 pub trait ModelOptions {
@@ -24,7 +23,7 @@ impl ModelCache {
         }
     }
 
-    pub async fn get_or_create<M, F>(&self, key: &str, loader: F) -> anyhow::Result<M>
+    pub fn get_or_create<M, F>(&self, key: &str, loader: F) -> anyhow::Result<M>
     where
         M: Clone + Send + Sync + 'static,
         F: FnOnce() -> anyhow::Result<M>,
@@ -33,7 +32,7 @@ impl ModelCache {
         let cache_key = (type_id, key.to_string());
 
         {
-            let cache = self.cache.lock().await;
+            let cache = self.cache.lock().unwrap();
             if let Some(cached) = cache.get(&cache_key) {
                 if let Some(model) = cached.downcast_ref::<M>() {
                     return Ok(model.clone());
@@ -44,7 +43,7 @@ impl ModelCache {
         let model = loader()?;
 
         {
-            let mut cache = self.cache.lock().await;
+            let mut cache = self.cache.lock().unwrap();
             cache.insert(
                 cache_key,
                 Arc::new(model.clone()) as Arc<dyn Any + Send + Sync>,
@@ -54,6 +53,22 @@ impl ModelCache {
         Ok(model)
     }
 
+    pub fn clear(&self) {
+        let mut cache = self.cache.lock().unwrap();
+        cache.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        let cache = self.cache.lock().unwrap();
+        cache.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let cache = self.cache.lock().unwrap();
+        cache.is_empty()
+    }
+
+    /// Async version for models with async constructors (e.g., TextGenerationModel).
     pub async fn get_or_create_async<M, Fut, F>(&self, key: &str, loader: F) -> anyhow::Result<M>
     where
         M: Clone + Send + Sync + 'static,
@@ -64,7 +79,7 @@ impl ModelCache {
         let cache_key = (type_id, key.to_string());
 
         {
-            let cache = self.cache.lock().await;
+            let cache = self.cache.lock().unwrap();
             if let Some(cached) = cache.get(&cache_key) {
                 if let Some(model) = cached.downcast_ref::<M>() {
                     return Ok(model.clone());
@@ -75,7 +90,7 @@ impl ModelCache {
         let model = loader().await?;
 
         {
-            let mut cache = self.cache.lock().await;
+            let mut cache = self.cache.lock().unwrap();
             cache.insert(
                 cache_key,
                 Arc::new(model.clone()) as Arc<dyn Any + Send + Sync>,
@@ -83,21 +98,6 @@ impl ModelCache {
         }
 
         Ok(model)
-    }
-
-    pub async fn clear(&self) {
-        let mut cache = self.cache.lock().await;
-        cache.clear();
-    }
-
-    pub async fn len(&self) -> usize {
-        let cache = self.cache.lock().await;
-        cache.len()
-    }
-
-    pub async fn is_empty(&self) -> bool {
-        let cache = self.cache.lock().await;
-        cache.is_empty()
     }
 }
 
@@ -123,8 +123,8 @@ mod tests {
         id: String,
     }
 
-    #[tokio::test]
-    async fn test_cache_returns_same_instance() {
+    #[test]
+    fn test_cache_returns_same_instance() {
         let cache = ModelCache::new();
         let model1 = cache
             .get_or_create::<TestModel, _>("test", || {
@@ -132,23 +132,21 @@ mod tests {
                     id: "original".into(),
                 })
             })
-            .await
             .unwrap();
         let model2 = cache
             .get_or_create::<TestModel, _>("test", || Ok(TestModel { id: "new".into() }))
-            .await
             .unwrap();
         assert_eq!(model1.id, model2.id);
     }
 
-    #[tokio::test]
-    async fn test_cache_clear() {
+    #[test]
+    fn test_cache_clear() {
         let cache = ModelCache::new();
         #[derive(Clone)]
         struct A;
-        let _ = cache.get_or_create::<A, _>("k", || Ok(A)).await.unwrap();
-        assert!(!cache.is_empty().await);
-        cache.clear().await;
-        assert!(cache.is_empty().await);
+        let _ = cache.get_or_create::<A, _>("k", || Ok(A)).unwrap();
+        assert!(!cache.is_empty());
+        cache.clear();
+        assert!(cache.is_empty());
     }
 }

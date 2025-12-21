@@ -2,13 +2,10 @@ use anyhow::Result;
 use transformers::pipelines::sentiment::*;
 use transformers::pipelines::utils::BasePipelineBuilder;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     println!("Building pipeline...");
 
-    let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
-        .build()
-        .await?;
+    let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     println!("Pipeline built successfully.");
 

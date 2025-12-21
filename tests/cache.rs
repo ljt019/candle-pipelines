@@ -3,13 +3,13 @@
 
 #![cfg(feature = "integration")]
 
-use transformers::core::global_cache;
+use transformers::pipelines::cache::global_cache;
 use transformers::pipelines::text_generation::*;
 use transformers::pipelines::utils::DeviceSelectable;
 
 #[tokio::test]
 async fn pipelines_share_weights() -> anyhow::Result<()> {
-    global_cache().clear().await;
+    global_cache().clear();
 
     let mut pipelines = Vec::new();
     for _ in 0..3 {
@@ -23,7 +23,7 @@ async fn pipelines_share_weights() -> anyhow::Result<()> {
     }
 
     // Only one model should be loaded
-    assert_eq!(global_cache().len().await, 1);
+    assert_eq!(global_cache().len(), 1);
 
     let _ = pipelines[0].completion("Hello").await?;
 
