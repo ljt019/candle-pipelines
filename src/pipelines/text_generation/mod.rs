@@ -47,6 +47,7 @@ pub mod model;
 pub mod params;
 pub mod parser;
 pub mod pipeline;
+pub mod stats;
 pub mod streaming;
 pub mod tools;
 pub mod xml_pipeline;
@@ -56,6 +57,7 @@ pub use crate::tools;
 pub use builder::TextGenerationPipelineBuilder;
 pub use params::GenerationParams;
 pub use pipeline::{Input, TextGenerationPipeline};
+pub use stats::GenerationStats;
 pub use streaming::{CompletionStream, EventStream};
 pub use xml_pipeline::XmlGenerationPipeline;
 

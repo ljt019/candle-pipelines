@@ -190,7 +190,10 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         use async_stream::stream;
         use futures::StreamExt;
 
-        let inner = self.base.token_stream(tokens);
+        let prompt_tokens = tokens.len();
+        let (_stream_stats, inner) = self
+            .base
+            .token_stream_with_prompt_count(tokens, Some(prompt_tokens));
 
         self.xml_parser.reset();
         let parser = self.xml_parser.clone();
@@ -442,6 +445,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         .expect("failed to encode")
                         .get_ids()
                         .to_vec();
+                    let total_prompt_tokens = new_tokens.len();
 
                     // Handle context overflow and caching
                     let max_seq_len = self.base.model.lock().await.get_max_seq_len();
@@ -462,7 +466,9 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         new_tokens
                     };
 
-                    let stream_inner = self.base.token_stream(tokens_to_process);
+                    let (_stream_stats, stream_inner) = self
+                        .base
+                        .token_stream_with_prompt_count(tokens_to_process, Some(total_prompt_tokens));
                     futures::pin_mut!(stream_inner);
 
                     while let Some(result) = stream_inner.next().await {

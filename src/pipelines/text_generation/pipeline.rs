@@ -5,6 +5,7 @@ use super::base_pipeline::BasePipeline;
 use super::model::TextGenerationModel;
 use super::model::{LanguageModelContext, ToggleableReasoning};
 use super::params::GenerationParams;
+use super::stats::GenerationStats;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
 use async_stream::try_stream;
 use regex::Regex;
@@ -58,6 +59,10 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         self.base.context_position().await
     }
 
+    pub fn last_generation_stats(&self) -> Option<GenerationStats> {
+        self.base.last_generation_stats()
+    }
+
     pub async fn set_generation_params(&self, params: GenerationParams) {
         self.base.set_generation_params(params).await;
     }
@@ -76,7 +81,26 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
+    /// Generate a completion and return generation statistics alongside the result.
+    pub async fn completion_with_stats<'a>(
+        &self,
+        input: impl Into<Input<'a>>,
+    ) -> anyhow::Result<(String, GenerationStats)> {
+        match input.into() {
+            Input::Prompt(p) => self.prompt_completion_internal_with_stats(p).await,
+            Input::Messages(m) => self.message_completion_internal_with_stats(m).await,
+        }
+    }
+
     async fn prompt_completion_internal(&self, prompt: &str) -> anyhow::Result<String> {
+        let (result, _) = self.prompt_completion_internal_with_stats(prompt).await?;
+        Ok(result)
+    }
+
+    async fn prompt_completion_internal_with_stats(
+        &self,
+        prompt: &str,
+    ) -> anyhow::Result<(String, GenerationStats)> {
         // Reset context for fresh generation
         self.base.context.lock().await.reset();
 
@@ -95,13 +119,26 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .get_ids()
             .to_vec();
 
-        self.base.completion_from_tokens(&prompt_tokens).await
+        self.base
+            .completion_from_tokens_with_stats(&prompt_tokens)
+            .await
     }
 
     async fn message_completion_internal(
         &self,
         messages: &[crate::Message],
     ) -> anyhow::Result<String> {
+        let (response, _) = self
+            .message_completion_internal_with_stats(messages)
+            .await?;
+
+        Ok(response)
+    }
+
+    async fn message_completion_internal_with_stats(
+        &self,
+        messages: &[crate::Message],
+    ) -> anyhow::Result<(String, GenerationStats)> {
         let templated_prompt = self.base.model.lock().await.apply_chat_template(messages)?;
 
         let new_tokens = self
@@ -124,23 +161,29 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             // Cache prefix matches, only feed the suffix
             let prefix_len = self.base.last_processed_tokens.lock().await.len();
             let new_portion = &new_tokens[prefix_len..];
-            let response = self.base.completion_from_tokens(new_portion).await?;
+            let (response, stats) = self
+                .base
+                .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())
+                .await?;
 
             // Track only prompt tokens for next turn
-            *self.base.last_processed_tokens.lock().await = new_tokens;
-            return Ok(response);
+            *self.base.last_processed_tokens.lock().await = new_tokens.clone();
+            return Ok((response, stats));
         } else {
             // Cache is invalid (conversation changed), reset
             self.base.context.lock().await.reset();
         }
 
         // Process all tokens from scratch
-        let response = self.base.completion_from_tokens(&new_tokens).await?;
+        let (response, stats) = self
+            .base
+            .completion_from_tokens_with_prompt_stats(&new_tokens, new_tokens.len())
+            .await?;
 
         // Update tracking (prompt tokens only)
         *self.base.last_processed_tokens.lock().await = new_tokens;
 
-        Ok(response)
+        Ok((response, stats))
     }
 
     /// Streaming version of completion
@@ -168,7 +211,8 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                     .map_err(|e| anyhow::anyhow!(e))?
                     .get_ids()
                     .to_vec();
-                Ok(self.completion_stream_from_tokens(tokens))
+                let prompt_tokens = tokens.len();
+                Ok(self.completion_stream_from_tokens(tokens, prompt_tokens))
             }
             Input::Messages(m) => {
                 let templated = self.base.model.lock().await.apply_chat_template(m)?;
@@ -188,13 +232,15 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                     let suffix =
                         new_tokens[self.base.last_processed_tokens.lock().await.len()..].to_vec();
                     *self.base.last_processed_tokens.lock().await = new_tokens;
-                    return Ok(self.completion_stream_from_tokens(suffix));
+                    let prompt_tokens = self.base.last_processed_tokens.lock().await.len();
+                    return Ok(self.completion_stream_from_tokens(suffix, prompt_tokens));
                 } else {
                     self.base.context.lock().await.reset();
                 }
 
                 *self.base.last_processed_tokens.lock().await = new_tokens.clone();
-                Ok(self.completion_stream_from_tokens(new_tokens))
+                let prompt_tokens = self.base.last_processed_tokens.lock().await.len();
+                Ok(self.completion_stream_from_tokens(new_tokens, prompt_tokens))
             }
         }
     }
@@ -202,14 +248,17 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
     fn completion_stream_from_tokens<'a>(
         &'a self,
         tokens: Vec<u32>,
+        prompt_token_count: usize,
     ) -> crate::pipelines::text_generation::streaming::CompletionStream<
         impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
     >
     where
         M: Send + 'a,
     {
-        let inner = self.base.token_stream(tokens);
-        crate::pipelines::text_generation::streaming::CompletionStream::new(inner)
+        let (stats, inner) = self
+            .base
+            .token_stream_with_prompt_count(tokens, Some(prompt_token_count));
+        crate::pipelines::text_generation::streaming::CompletionStream::new(inner, stats)
     }
 }
 
@@ -415,6 +464,9 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
             Input::Messages(m) => m.to_vec(),
         };
 
+        let stream_stats = std::sync::Arc::new(std::sync::Mutex::new(GenerationStats::new()));
+        let stream_stats_inner = std::sync::Arc::clone(&stream_stats);
+
         let out_stream = try_stream! {
             let mut messages = initial_messages;
             let mut response_buffer = String::new();
@@ -429,6 +481,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
 
                 // Stream the response
                 {
+                    let stream_stats = std::sync::Arc::clone(&stream_stats_inner);
                     let stream_inner = self.completion_stream(&messages[..]).await?;
                     futures::pin_mut!(stream_inner);
 
@@ -436,6 +489,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                         let chunk = chunk_res?;
                         response_buffer.push_str(&chunk);
                         yield chunk;
+                    }
+
+                    if let Some(stats) = self.last_generation_stats() {
+                        *stream_stats.lock().unwrap() = stats;
                     }
                 }
 
@@ -465,7 +522,12 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                 }
             }
         };
-        Ok(crate::pipelines::text_generation::streaming::CompletionStream::new(out_stream))
+        Ok(
+            crate::pipelines::text_generation::streaming::CompletionStream::new(
+                out_stream,
+                stream_stats,
+            ),
+        )
     }
 
     fn extract_tool_calls(text: &str) -> anyhow::Result<Vec<ToolCallInvocation>> {

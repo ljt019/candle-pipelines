@@ -7,13 +7,20 @@ pin_project! {
     pub struct CompletionStream<S> {
         #[pin]
         inner: Pin<Box<S>>,
+        stats: std::sync::Arc<std::sync::Mutex<crate::pipelines::text_generation::stats::GenerationStats>>,
     }
 }
 
 impl<S> CompletionStream<S> {
-    pub(crate) fn new(inner: S) -> Self {
+    pub(crate) fn new(
+        inner: S,
+        stats: std::sync::Arc<
+            std::sync::Mutex<crate::pipelines::text_generation::stats::GenerationStats>,
+        >,
+    ) -> Self {
         Self {
             inner: Box::pin(inner),
+            stats,
         }
     }
 
@@ -67,7 +74,7 @@ impl<S> CompletionStream<S> {
         F: FnMut(anyhow::Result<String>) -> T,
     {
         use futures::StreamExt;
-        CompletionStream::new(self.inner.map(f))
+        CompletionStream::new(self.inner.map(f), self.stats)
     }
 
     /// Filter chunks in the stream based on a predicate.
@@ -77,7 +84,10 @@ impl<S> CompletionStream<S> {
         F: FnMut(&anyhow::Result<String>) -> bool,
     {
         use futures::StreamExt;
-        CompletionStream::new(self.inner.filter(move |item| std::future::ready(f(item))))
+        CompletionStream::new(
+            self.inner.filter(move |item| std::future::ready(f(item))),
+            self.stats,
+        )
     }
 
     /// Fold over the stream, producing a single value.
@@ -90,6 +100,13 @@ impl<S> CompletionStream<S> {
         self.inner
             .fold(init, |acc, item| std::future::ready(f(acc, item)))
             .await
+    }
+
+    /// Return the generation statistics collected during streaming.
+    ///
+    /// Statistics are typically finalized once the stream has completed.
+    pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
+        self.stats.lock().unwrap().clone()
     }
 }
 
