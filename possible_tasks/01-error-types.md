@@ -11,8 +11,9 @@ Replace `anyhow::Error` with structured `TransformersError` enum across the enti
 
 ## Current State
 - `ToolError` exists in `pipelines::text_generation::tools`
-- Everything else uses `anyhow::Result`
+- Everything else uses `anyhow::Result` (~150 usages across 27 files)
 - Errors from candle wrapped as-is
+- `GenerationStats` added (new stats module)
 
 ## Proposed Error Type
 
@@ -124,7 +125,7 @@ Replace all `anyhow::Result` with `transformers::Result` in one pass.
 - `src/models/modernbert.rs`
 
 **Pipelines:**
-- `src/pipelines/text_generation/*.rs`
+- `src/pipelines/text_generation/*.rs` (includes `base_pipeline.rs`, `pipeline.rs`, `xml_pipeline.rs`, `streaming/*.rs`, `stats.rs`)
 - `src/pipelines/fill_mask/*.rs`
 - `src/pipelines/sentiment/*.rs`
 - `src/pipelines/zero_shot/*.rs`

@@ -8,8 +8,9 @@ Many real-world tools need to perform I/O operations (API calls, database querie
 
 ## Current State
 ```rust
-pub(crate) function: fn(parameters: HashMap<String, String>) -> Result<String, ToolError>,
+pub(crate) function: fn(parameters: serde_json::Value) -> Result<String, ToolError>,
 ```
+Tools now use `serde_json::Value` for parameters (typed via schemars).
 
 ## Proposed Changes
 - Support `async fn` in tool definitions

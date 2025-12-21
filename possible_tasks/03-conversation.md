@@ -7,9 +7,12 @@ Create a first-class `Conversation` type for managing multi-turn dialogues with 
 Currently, users manage `Vec<Message>` manually. A dedicated conversation type would simplify common patterns and handle edge cases automatically.
 
 ## Current State
-- `Message` type exists in `src/message.rs` (top-level, re-exported from lib)
-- `MessageVecExt` trait provides convenience methods
-- No built-in conversation context management
+- `Message` type exists in `src/message.rs` (re-exported from `lib.rs`)
+- `MessageVecExt` trait provides convenience methods (`as_json()`)
+- `Role` enum: `System`, `User`, `Assistant`
+- Pipelines have `completion_batch` and `chat_batch` for batch processing
+- KV cache reuse exists for multi-turn (prefix matching in `base_pipeline.rs`)
+- No built-in conversation context management or truncation
 
 ## Proposed Features
 - Automatic context window management (truncation strategies)
