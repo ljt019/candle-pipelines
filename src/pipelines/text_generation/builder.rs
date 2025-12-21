@@ -2,6 +2,7 @@ use super::params::GenerationParams;
 use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
 use crate::pipelines::cache::{global_cache, ModelOptions};
 use crate::pipelines::utils::{build_cache_key, DeviceRequest, DeviceSelectable};
+use crate::Result;
 
 use super::model::TextGenerationModel;
 use super::parser::XmlParserBuilder;
@@ -73,7 +74,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         self
     }
 
-    pub async fn build(self) -> anyhow::Result<TextGenerationPipeline<M>>
+    pub async fn build(self) -> Result<TextGenerationPipeline<M>>
     where
         M: Clone + Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
@@ -92,7 +93,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         TextGenerationPipeline::new(model, self.gen_params, device).await
     }
 
-    pub async fn build_xml(self, tags: &[&str]) -> anyhow::Result<XmlGenerationPipeline<M>>
+    pub async fn build_xml(self, tags: &[&str]) -> Result<XmlGenerationPipeline<M>>
     where
         M: Clone + Send + Sync + 'static,
         M::Options: ModelOptions + Clone,

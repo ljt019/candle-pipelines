@@ -3,7 +3,7 @@
 //! This implementation wraps candle-transformers' quantized Qwen3 for text generation.
 
 use candle_core::quantized::gguf_file;
-use candle_core::{DType, Device, Result, Tensor};
+use candle_core::{DType, Device, Result as CandleResult, Tensor};
 use candle_transformers::models::quantized_qwen3 as candle_qwen3;
 use minijinja::UndefinedBehavior;
 use minijinja::{context, Environment};
@@ -11,6 +11,8 @@ use minijinja_contrib::{add_to_environment, pycompat};
 use std::io::{Read, Seek};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
+
+use crate::{Result, TransformersError};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Qwen3Size {
@@ -89,7 +91,7 @@ pub struct Qwen3Model {
 
 impl Qwen3Model {
     /// Load and prepare the chat template environment
-    async fn load_chat_template_env() -> anyhow::Result<Arc<Environment<'static>>> {
+    async fn load_chat_template_env() -> Result<Arc<Environment<'static>>> {
         // Load the tokenizer config and extract the chat template
         let tokenizer_config_loader =
             crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
@@ -98,9 +100,11 @@ impl Qwen3Model {
         let tokenizer_config_content = std::fs::read_to_string(tokenizer_config_path)?;
         let config_json: serde_json::Value = serde_json::from_str(&tokenizer_config_content)?;
 
-        let chat_template_str = config_json["chat_template"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'chat_template' field in tokenizer config"))?;
+        let chat_template_str = config_json["chat_template"].as_str().ok_or_else(|| {
+            TransformersError::ChatTemplate(
+                "Missing 'chat_template' field in tokenizer config".to_string(),
+            )
+        })?;
 
         let mut chat_template_owned = chat_template_str.to_string();
 
@@ -129,25 +133,31 @@ impl Qwen3Model {
 
         // Leak the string to get 'static lifetime - this is fine since we're storing it in the model
         let chat_template_static = Box::leak(chat_template_owned.into_boxed_str());
-        env.add_template("chat", chat_template_static)?;
+        env.add_template("chat", chat_template_static)
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
 
         Ok(Arc::new(env))
     }
     /// Load a Qwen3 model from a GGUF file.
-    pub async fn from_gguf<R: Read + Seek>(
-        reader: &mut R,
-        device: &Device,
-    ) -> anyhow::Result<Self> {
+    pub async fn from_gguf<R: Read + Seek>(reader: &mut R, device: &Device) -> Result<Self> {
         let content = gguf_file::Content::read(reader)?;
         let num_layers = content
             .metadata
             .get("qwen3.block_count")
-            .ok_or_else(|| anyhow::anyhow!("Missing metadata key: qwen3.block_count"))?
+            .ok_or_else(|| {
+                TransformersError::ModelMetadata(
+                    "Missing metadata key: qwen3.block_count".to_string(),
+                )
+            })?
             .to_u32()? as usize;
         let max_seq_len = content
             .metadata
             .get("qwen3.context_length")
-            .ok_or_else(|| anyhow::anyhow!("Missing metadata key: qwen3.context_length"))?
+            .ok_or_else(|| {
+                TransformersError::ModelMetadata(
+                    "Missing metadata key: qwen3.context_length".to_string(),
+                )
+            })?
             .to_u32()? as usize;
         let dtype = match content.metadata.get("general.dtype") {
             Some(v) => match v.to_u32().unwrap_or(1) {
@@ -185,7 +195,7 @@ impl Qwen3Model {
     }
 
     /// Load the model from hf
-    pub async fn from_hf(device: &Device, size: Qwen3Size) -> anyhow::Result<Self> {
+    pub async fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
         let (repo_id, file_name) = size.to_id();
 
         // Download the model from hf
@@ -203,12 +213,20 @@ impl Qwen3Model {
         let num_layers = content
             .metadata
             .get("qwen3.block_count")
-            .ok_or_else(|| anyhow::anyhow!("Missing metadata key: qwen3.block_count"))?
+            .ok_or_else(|| {
+                TransformersError::ModelMetadata(
+                    "Missing metadata key: qwen3.block_count".to_string(),
+                )
+            })?
             .to_u32()? as usize;
         let max_seq_len = content
             .metadata
             .get("qwen3.context_length")
-            .ok_or_else(|| anyhow::anyhow!("Missing metadata key: qwen3.context_length"))?
+            .ok_or_else(|| {
+                TransformersError::ModelMetadata(
+                    "Missing metadata key: qwen3.context_length".to_string(),
+                )
+            })?
             .to_u32()? as usize;
         let dtype = match content.metadata.get("general.dtype") {
             Some(v) => match v.to_u32().unwrap_or(1) {
@@ -240,7 +258,7 @@ impl Qwen3Model {
     }
 
     /// Get the models suggested tokenizer
-    pub async fn get_tokenizer(&self) -> anyhow::Result<Tokenizer> {
+    pub async fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new("Qwen/Qwen3-0.6B", "tokenizer.json");
         let tokenizer = tokenizer_loader.load().await?;
         Ok(tokenizer)
@@ -300,7 +318,7 @@ impl Context {
     ///
     /// # Returns
     /// Logits for next token prediction with shape [batch_size, vocab_size]
-    pub fn generate(&mut self, input_ids: &Tensor) -> Result<Tensor> {
+    pub fn generate(&mut self, input_ids: &Tensor) -> CandleResult<Tensor> {
         let seq_len = input_ids.dim(1)?;
 
         // Starting a fresh sequence → ensure KV cache is empty.
@@ -400,15 +418,15 @@ impl TextGenerationModel for Qwen3Model {
         self.info.max_seq_len
     }
 
-    async fn new(options: Self::Options, device: candle_core::Device) -> anyhow::Result<Self> {
+    async fn new(options: Self::Options, device: candle_core::Device) -> Result<Self> {
         Qwen3Model::from_hf(&device, options).await
     }
 
-    async fn get_tokenizer(&self) -> anyhow::Result<tokenizers::Tokenizer> {
+    async fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer> {
         Qwen3Model::get_tokenizer(self).await
     }
 
-    fn apply_chat_template(&self, messages: &[crate::Message]) -> anyhow::Result<String> {
+    fn apply_chat_template(&self, messages: &[crate::Message]) -> Result<String> {
         // Determine thinking mode
         let mut enable_thinking = self.reasoning;
         if let Some(last_user_msg) = messages
@@ -446,13 +464,15 @@ impl TextGenerationModel for Qwen3Model {
         // Render the template using the pre-loaded environment
         let rendered = self
             .chat_template_env
-            .get_template("chat")?
+            .get_template("chat")
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?
             .render(context! {
                 messages => messages_dicts,
                 add_generation_prompt => true,
                 enable_thinking => enable_thinking,
                 tools => self.registered_tools(),
-            })?;
+            })
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
 
         Ok(rendered)
     }
@@ -461,7 +481,7 @@ impl TextGenerationModel for Qwen3Model {
         Context::new(self.weights.clone(), self.info.clone())
     }
 
-    fn clear_context(&self, context: &mut Context) -> anyhow::Result<()> {
+    fn clear_context(&self, context: &mut Context) -> Result<()> {
         context.reset();
         Ok(())
     }
@@ -483,7 +503,7 @@ impl TextGenerationModel for Qwen3Model {
 }
 
 impl ToggleableReasoning for Qwen3Model {
-    fn set_reasoning(&mut self, enable: bool) -> anyhow::Result<()> {
+    fn set_reasoning(&mut self, enable: bool) -> Result<()> {
         self.reasoning = enable;
         Ok(())
     }
@@ -493,7 +513,7 @@ use crate::pipelines::text_generation::model::Tool;
 use crate::pipelines::text_generation::tools::ToolError;
 
 impl ToolCalling for Qwen3Model {
-    fn register_tool(&mut self, tool: Tool) -> anyhow::Result<()> {
+    fn register_tool(&mut self, tool: Tool) -> Result<()> {
         // Replace existing tool with same name if present
         if let Some(pos) = self.tools.iter().position(|t| t.name() == tool.name()) {
             self.tools[pos] = tool;
@@ -503,14 +523,14 @@ impl ToolCalling for Qwen3Model {
         Ok(())
     }
 
-    fn unregister_tool(&mut self, name: &str) -> anyhow::Result<()> {
+    fn unregister_tool(&mut self, name: &str) -> Result<()> {
         if let Some(pos) = self.tools.iter().position(|t| t.name() == name) {
             self.tools.remove(pos);
         }
         Ok(())
     }
 
-    fn clear_tools(&mut self) -> anyhow::Result<()> {
+    fn clear_tools(&mut self) -> Result<()> {
         self.tools.clear();
         Ok(())
     }

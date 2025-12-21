@@ -13,6 +13,7 @@ use tokio::fs;
 use crate::loaders::GenerationConfig;
 use crate::loaders::{GenerationConfigLoader, GgufModelLoader, HfLoader, TokenizerLoader};
 use crate::pipelines::text_generation::model::{LanguageModelContext, TextGenerationModel};
+use crate::{Result, TransformersError};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Gemma3Size {
@@ -88,13 +89,16 @@ pub struct Gemma3Model {
 }
 
 impl Gemma3Model {
-    fn parse_metadata(content: &gguf_file::Content, device: &Device) -> anyhow::Result<ModelInfo> {
+    fn parse_metadata(content: &gguf_file::Content, device: &Device) -> Result<ModelInfo> {
         let num_layers = content
             .metadata
             .get("gemma3.block_count")
             .and_then(|v| v.to_u32().ok())
-            .ok_or_else(|| anyhow::anyhow!("Missing critical metadata: gemma3.block_count"))?
-            as usize;
+            .ok_or_else(|| {
+                TransformersError::ModelMetadata(
+                    "Missing critical metadata: gemma3.block_count".to_string(),
+                )
+            })? as usize;
 
         let max_seq_len = content
             .metadata
@@ -128,15 +132,17 @@ impl Gemma3Model {
         })
     }
 
-    async fn load_chat_template_env(repo_id: &str) -> anyhow::Result<Arc<Environment<'static>>> {
+    async fn load_chat_template_env(repo_id: &str) -> Result<Arc<Environment<'static>>> {
         let tokenizer_config_loader = HfLoader::new(repo_id, "tokenizer_config.json");
         let tokenizer_config_path = tokenizer_config_loader.load().await?;
         let tokenizer_config_content = fs::read_to_string(tokenizer_config_path).await?;
         let config_json: serde_json::Value = serde_json::from_str(&tokenizer_config_content)?;
 
-        let chat_template_str = config_json["chat_template"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'chat_template' field in tokenizer config"))?;
+        let chat_template_str = config_json["chat_template"].as_str().ok_or_else(|| {
+            TransformersError::ChatTemplate(
+                "Missing 'chat_template' field in tokenizer config".to_string(),
+            )
+        })?;
 
         let mut env = Environment::new();
         env.set_undefined_behavior(UndefinedBehavior::Lenient);
@@ -144,7 +150,8 @@ impl Gemma3Model {
         env.set_unknown_method_callback(pycompat::unknown_method_callback);
         env.add_filter("tojson", minijinja::filters::tojson);
 
-        env.add_template_owned("chat", chat_template_str.to_string())?;
+        env.add_template_owned("chat", chat_template_str.to_string())
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
 
         Ok(Arc::new(env))
     }
@@ -157,11 +164,12 @@ impl Gemma3Model {
             .collect()
     }
 
-    fn ensure_eos_tokens(config: &GenerationConfig) -> anyhow::Result<()> {
+    fn ensure_eos_tokens(config: &GenerationConfig) -> Result<()> {
         if config.eos_token_ids.is_empty() {
-            anyhow::bail!(
+            return Err(TransformersError::ModelMetadata(
                 "Gemma3 generation config is missing 'eos_token_ids'; cannot determine end-of-sequence tokens"
-            );
+                    .to_string(),
+            ));
         }
 
         Ok(())
@@ -171,7 +179,7 @@ impl Gemma3Model {
         reader: &mut R,
         device: &Device,
         size: Gemma3Size,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let content = gguf_file::Content::read(reader)?;
         let info = Self::parse_metadata(&content, device)?;
         let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
@@ -195,7 +203,7 @@ impl Gemma3Model {
         })
     }
 
-    pub async fn from_hf(device: &Device, size: Gemma3Size) -> anyhow::Result<Self> {
+    pub async fn from_hf(device: &Device, size: Gemma3Size) -> Result<Self> {
         let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
         let (mut file, content) = loader.load().await?;
         let info = Self::parse_metadata(&content, device)?;
@@ -220,7 +228,7 @@ impl Gemma3Model {
         })
     }
 
-    pub async fn get_tokenizer(&self) -> anyhow::Result<Tokenizer> {
+    pub async fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new(&self.tokenizer_repo_id, "tokenizer.json");
         tokenizer_loader.load().await
     }
@@ -287,22 +295,24 @@ impl TextGenerationModel for Gemma3Model {
     type Options = Gemma3Size;
     type Context = Context;
 
-    async fn new(options: Self::Options, device: Device) -> anyhow::Result<Self> {
+    async fn new(options: Self::Options, device: Device) -> Result<Self> {
         Gemma3Model::from_hf(&device, options).await
     }
 
-    async fn get_tokenizer(&self) -> anyhow::Result<Tokenizer> {
+    async fn get_tokenizer(&self) -> Result<Tokenizer> {
         Gemma3Model::get_tokenizer(self).await
     }
 
-    fn apply_chat_template(&self, messages: &[crate::Message]) -> anyhow::Result<String> {
+    fn apply_chat_template(&self, messages: &[crate::Message]) -> Result<String> {
         let rendered = self
             .chat_template_env
-            .get_template("chat")?
+            .get_template("chat")
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?
             .render(context! {
                 messages => messages,
                 add_generation_prompt => true,
-            })?;
+            })
+            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
         Ok(rendered)
     }
 
@@ -322,7 +332,7 @@ impl TextGenerationModel for Gemma3Model {
         self.create_context()
     }
 
-    fn clear_context(&self, context: &mut Context) -> anyhow::Result<()> {
+    fn clear_context(&self, context: &mut Context) -> Result<()> {
         context.reset_with(&self.base_weights);
         Ok(())
     }

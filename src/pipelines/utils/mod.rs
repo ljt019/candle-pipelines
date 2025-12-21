@@ -1,4 +1,5 @@
 use super::cache::ModelOptions;
+use crate::{Result, TransformersError};
 use candle_core::{CudaDevice, Device};
 
 pub mod builder;
@@ -20,7 +21,7 @@ pub enum DeviceRequest {
 
 impl DeviceRequest {
     /// Resolve the request into an actual [`Device`].
-    pub fn resolve(self) -> anyhow::Result<Device> {
+    pub fn resolve(self) -> Result<Device> {
         match self {
             DeviceRequest::Default => {
                 // Try CUDA 0, fall back to CPU
@@ -30,7 +31,9 @@ impl DeviceRequest {
                 }
             }
             DeviceRequest::Cpu => Ok(Device::Cpu),
-            DeviceRequest::Cuda(i) => Ok(Device::Cuda(CudaDevice::new_with_stream(i)?)),
+            DeviceRequest::Cuda(i) => CudaDevice::new_with_stream(i)
+                .map(Device::Cuda)
+                .map_err(|e| TransformersError::Device(e.to_string())),
             DeviceRequest::Explicit(d) => Ok(d),
         }
     }

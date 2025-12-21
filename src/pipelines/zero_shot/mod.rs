@@ -15,9 +15,7 @@
 //! ## Usage Example
 //!
 //! ```rust,no_run
-//! use anyhow::Result;
-//! use transformers::pipelines::utils::BasePipelineBuilder;
-//! use transformers::pipelines::zero_shot::*;
+//! use transformers::{pipelines::utils::BasePipelineBuilder, pipelines::zero_shot::*, Result};
 //!
 //! fn main() -> Result<()> {
 //!     // Create a zero-shot classification pipeline
@@ -45,5 +43,4 @@ pub use model::ZeroShotClassificationModel;
 pub use pipeline::ZeroShotClassificationPipeline;
 
 pub use crate::models::ModernBertSize;
-
-pub use anyhow::Result;
+pub use crate::Result;

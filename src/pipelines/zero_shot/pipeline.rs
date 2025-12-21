@@ -1,4 +1,5 @@
 use super::model::ZeroShotClassificationModel;
+use crate::Result;
 use tokenizers::Tokenizer;
 
 #[derive(Debug, Clone)]
@@ -18,7 +19,7 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
         &self,
         text: &str,
         candidate_labels: &[&str],
-    ) -> anyhow::Result<Vec<ClassificationResult>> {
+    ) -> Result<Vec<ClassificationResult>> {
         let results = self
             .model
             .predict(&self.tokenizer, text, candidate_labels)?;
@@ -33,7 +34,7 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
         &self,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> anyhow::Result<Vec<anyhow::Result<Vec<ClassificationResult>>>> {
+    ) -> Result<Vec<Result<Vec<ClassificationResult>>>> {
         let results = self
             .model
             .predict_batch(&self.tokenizer, texts, candidate_labels)?;
@@ -56,7 +57,7 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
         &self,
         text: &str,
         candidate_labels: &[&str],
-    ) -> anyhow::Result<Vec<ClassificationResult>> {
+    ) -> Result<Vec<ClassificationResult>> {
         let results = self
             .model
             .predict_multi_label(&self.tokenizer, text, candidate_labels)?;
@@ -71,7 +72,7 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
         &self,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> anyhow::Result<Vec<anyhow::Result<Vec<ClassificationResult>>>> {
+    ) -> Result<Vec<Result<Vec<ClassificationResult>>>> {
         let results =
             self.model
                 .predict_multi_label_batch(&self.tokenizer, texts, candidate_labels)?;

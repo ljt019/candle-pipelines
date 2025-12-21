@@ -1,4 +1,5 @@
 use crate::Message;
+use crate::Result;
 use candle_core::{Device, Tensor};
 
 // Re-export tool-related types
@@ -33,13 +34,13 @@ pub trait TextGenerationModel {
     /// so that asynchronous streams capturing it can be moved across threads.
     type Context: LanguageModelContext + Send;
 
-    async fn new(options: Self::Options, device: Device) -> anyhow::Result<Self>
+    async fn new(options: Self::Options, device: Device) -> Result<Self>
     where
         Self: Sized;
 
-    async fn get_tokenizer(&self) -> anyhow::Result<tokenizers::Tokenizer>;
+    async fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer>;
 
-    fn apply_chat_template(&self, messages: &[Message]) -> anyhow::Result<String>;
+    fn apply_chat_template(&self, messages: &[Message]) -> Result<String>;
 
     fn get_eos_token(&self) -> Option<u32>;
 
@@ -52,7 +53,7 @@ pub trait TextGenerationModel {
 
     fn new_context(&self) -> Self::Context;
 
-    fn clear_context(&self, context: &mut Self::Context) -> anyhow::Result<()>;
+    fn clear_context(&self, context: &mut Self::Context) -> Result<()>;
 
     /// Get the default generation parameters for this model.
     fn default_generation_params(
@@ -65,5 +66,5 @@ pub trait TextGenerationModel {
 pub trait Reasoning {}
 
 pub trait ToggleableReasoning {
-    fn set_reasoning(&mut self, enable: bool) -> anyhow::Result<()>;
+    fn set_reasoning(&mut self, enable: bool) -> Result<()>;
 }

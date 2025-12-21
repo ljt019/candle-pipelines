@@ -1,5 +1,6 @@
 //! Model caching utilities for sharing weights across multiple pipelines.
 
+use crate::Result;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,10 +24,10 @@ impl ModelCache {
         }
     }
 
-    pub fn get_or_create<M, F>(&self, key: &str, loader: F) -> anyhow::Result<M>
+    pub fn get_or_create<M, F>(&self, key: &str, loader: F) -> Result<M>
     where
         M: Clone + Send + Sync + 'static,
-        F: FnOnce() -> anyhow::Result<M>,
+        F: FnOnce() -> Result<M>,
     {
         let type_id = TypeId::of::<M>();
         let cache_key = (type_id, key.to_string());
@@ -69,11 +70,11 @@ impl ModelCache {
     }
 
     /// Async version for models with async constructors (e.g., TextGenerationModel).
-    pub async fn get_or_create_async<M, Fut, F>(&self, key: &str, loader: F) -> anyhow::Result<M>
+    pub async fn get_or_create_async<M, Fut, F>(&self, key: &str, loader: F) -> Result<M>
     where
         M: Clone + Send + Sync + 'static,
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = anyhow::Result<M>>,
+        Fut: std::future::Future<Output = Result<M>>,
     {
         let type_id = TypeId::of::<M>();
         let cache_key = (type_id, key.to_string());

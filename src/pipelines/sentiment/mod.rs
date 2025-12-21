@@ -14,9 +14,7 @@
 //! ## Usage Example
 //!
 //! ```rust,no_run
-//! use anyhow::Result;
-//! use transformers::pipelines::sentiment::*;
-//! use transformers::pipelines::utils::BasePipelineBuilder;
+//! use transformers::{pipelines::sentiment::*, pipelines::utils::BasePipelineBuilder, Result};
 //!
 //! fn main() -> Result<()> {
 //!     // Create a sentiment analysis pipeline
@@ -39,5 +37,4 @@ pub use model::SentimentAnalysisModel;
 pub use pipeline::SentimentAnalysisPipeline;
 
 pub use crate::models::ModernBertSize;
-
-pub use anyhow::Result;
+pub use crate::Result;

@@ -1,4 +1,5 @@
 use super::model::FillMaskModel;
+use crate::{Result, TransformersError};
 use tokenizers::Tokenizer;
 
 #[derive(Debug, Clone)]
@@ -14,35 +15,31 @@ pub struct FillMaskPipeline<M: FillMaskModel> {
 
 impl<M: FillMaskModel> FillMaskPipeline<M> {
     /// Return the top prediction for the masked token
-    pub fn predict(&self, text: &str) -> anyhow::Result<FillMaskPrediction> {
+    pub fn predict(&self, text: &str) -> Result<FillMaskPrediction> {
         let predictions = self.predict_top_k(text, 1)?;
         predictions
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow::anyhow!("No predictions returned"))
+            .ok_or_else(|| TransformersError::Generation("No predictions returned".to_string()))
     }
 
     /// Return the top prediction for each input in the batch.
-    pub fn predict_batch(
-        &self,
-        texts: &[&str],
-    ) -> anyhow::Result<Vec<anyhow::Result<FillMaskPrediction>>> {
+    pub fn predict_batch(&self, texts: &[&str]) -> Result<Vec<Result<FillMaskPrediction>>> {
         let batched = self.predict_top_k_batch(texts, 1)?;
         Ok(batched
             .into_iter()
             .map(|result| {
                 result.and_then(|preds| {
-                    preds
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("No predictions returned"))
+                    preds.into_iter().next().ok_or_else(|| {
+                        TransformersError::Generation("No predictions returned".to_string())
+                    })
                 })
             })
             .collect::<Vec<_>>())
     }
 
     /// Return top-k predictions with scores for ranking/choice
-    pub fn predict_top_k(&self, text: &str, k: usize) -> anyhow::Result<Vec<FillMaskPrediction>> {
+    pub fn predict_top_k(&self, text: &str, k: usize) -> Result<Vec<FillMaskPrediction>> {
         self.model.predict_top_k(&self.tokenizer, text, k)
     }
 
@@ -51,7 +48,7 @@ impl<M: FillMaskModel> FillMaskPipeline<M> {
         &self,
         texts: &[&str],
         k: usize,
-    ) -> anyhow::Result<Vec<anyhow::Result<Vec<FillMaskPrediction>>>> {
+    ) -> Result<Vec<Result<Vec<FillMaskPrediction>>>> {
         self.model.predict_top_k_batch(&self.tokenizer, texts, k)
     }
 

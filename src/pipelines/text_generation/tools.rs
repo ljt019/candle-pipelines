@@ -1,3 +1,4 @@
+use crate::Result;
 use thiserror::Error;
 
 /// Error type returned by tool functions.
@@ -11,6 +12,8 @@ pub enum ToolError {
     #[error("parameter decoding failed: {0}")]
     Format(String),
 }
+
+pub type ToolResult<T> = std::result::Result<T, ToolError>;
 
 /// Strategy for handling tool errors.
 #[derive(Debug, Clone)]
@@ -28,15 +31,12 @@ impl Default for ErrorStrategy {
 }
 
 pub trait ToolCalling {
-    fn register_tool(&mut self, tool: Tool) -> anyhow::Result<()>;
-    fn unregister_tool(&mut self, name: &str) -> anyhow::Result<()>;
-    fn clear_tools(&mut self) -> anyhow::Result<()>;
+    fn register_tool(&mut self, tool: Tool) -> Result<()>;
+    fn unregister_tool(&mut self, name: &str) -> Result<()>;
+    fn clear_tools(&mut self) -> Result<()>;
     fn registered_tools(&self) -> Vec<Tool>;
-    fn call_tool(
-        &mut self,
-        tool_name: String,
-        parameters: serde_json::Value,
-    ) -> Result<String, ToolError>;
+    fn call_tool(&mut self, tool_name: String, parameters: serde_json::Value)
+        -> ToolResult<String>;
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -46,7 +46,7 @@ pub struct Tool {
     #[serde(rename = "parameters")]
     pub(crate) schema: schemars::schema::RootSchema,
     #[serde(skip_serializing)]
-    pub(crate) function: fn(parameters: serde_json::Value) -> Result<String, ToolError>,
+    pub(crate) function: fn(parameters: serde_json::Value) -> ToolResult<String>,
     #[serde(skip_serializing)]
     pub(crate) error_strategy: ErrorStrategy,
     #[serde(skip_serializing)]
@@ -59,7 +59,7 @@ impl Tool {
         name: String,
         description: String,
         schema: schemars::schema::RootSchema,
-        function: fn(parameters: serde_json::Value) -> Result<String, ToolError>,
+        function: fn(parameters: serde_json::Value) -> ToolResult<String>,
         error_strategy: ErrorStrategy,
         max_retries: u32,
     ) -> Self {
@@ -79,7 +79,7 @@ impl Tool {
     }
 
     /// Execute the tool with the given parameters, returning its result.
-    pub fn call(&self, parameters: serde_json::Value) -> Result<String, ToolError> {
+    pub fn call(&self, parameters: serde_json::Value) -> ToolResult<String> {
         self.validate(&parameters)?;
         (self.function)(parameters)
     }
@@ -105,7 +105,7 @@ impl Tool {
     }
 
     /// Validate a parameters value against the tool schema.
-    pub fn validate(&self, params: &serde_json::Value) -> Result<(), ToolError> {
+    pub fn validate(&self, params: &serde_json::Value) -> ToolResult<()> {
         let schema = serde_json::to_value(&self.schema)
             .map_err(|e| ToolError::Format(format!("schema serialization failed: {e}")))?;
         let compiled = jsonschema::JSONSchema::options()

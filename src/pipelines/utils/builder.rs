@@ -10,7 +10,7 @@
 
 use super::{build_cache_key, DeviceRequest, DeviceSelectable};
 use crate::pipelines::cache::{global_cache, ModelOptions};
-use anyhow::Result;
+use crate::Result;
 
 /// A trait that captures the common pipeline building pattern.
 ///

@@ -16,8 +16,7 @@
 //! ## Usage Example
 //!
 //! ```rust,no_run
-//! use anyhow::Result;
-//! use transformers::loaders::{GgufModelLoader, TokenizerLoader};
+//! use transformers::{Result, loaders::{GgufModelLoader, TokenizerLoader}};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<()> {
@@ -38,6 +37,9 @@
 //! and Hugging Face Hub lock acquisition failures.
 
 use serde::Deserialize;
+use tokio::time::Duration;
+
+use crate::{Result, TransformersError};
 
 /// Configuration loaded from HuggingFace generation_config.json
 #[derive(Clone)]
@@ -67,16 +69,17 @@ impl HfLoader {
         }
     }
 
-    pub async fn load(&self) -> anyhow::Result<PathBuf> {
+    pub async fn load(&self) -> Result<PathBuf> {
         let hf_api = hf_hub::api::tokio::ApiBuilder::new()
             .with_chunk_size(None)
-            .build()?;
+            .build()
+            .map_err(|e| TransformersError::Download(e.to_string()))?;
         let hf_repo = self.repo.clone();
         let hf_api = hf_api.model(hf_repo);
 
         // Retry logic for lock acquisition failures
         let max_retries = 3;
-        let mut last_error = None;
+        let mut last_error: Option<TransformersError> = None;
 
         for attempt in 0..max_retries {
             match hf_api.get(self.filename.as_str()).await {
@@ -85,20 +88,19 @@ impl HfLoader {
                     let error_msg = e.to_string();
                     if error_msg.contains("Lock acquisition failed") && attempt < max_retries - 1 {
                         // Wait before retrying, with exponential backoff
-                        let wait_time = std::time::Duration::from_millis(100 * (1 << attempt));
+                        let wait_time = Duration::from_millis(100 * (1 << attempt));
                         tokio::time::sleep(wait_time).await;
-                        last_error = Some(e);
+                        last_error = Some(TransformersError::Download(error_msg));
                         continue;
                     }
-                    return Err(e.into());
+                    return Err(TransformersError::Download(error_msg));
                 }
             }
         }
 
         // If we exhausted all retries, return the last encountered error or a generic one
         Err(last_error
-            .map(anyhow::Error::from)
-            .unwrap_or_else(|| anyhow::anyhow!("unknown failure")))
+            .unwrap_or_else(|| TransformersError::Download("unknown failure".to_string())))
     }
 }
 
@@ -116,11 +118,12 @@ impl TokenizerLoader {
         }
     }
 
-    pub async fn load(&self) -> anyhow::Result<Tokenizer> {
+    pub async fn load(&self) -> Result<Tokenizer> {
         let tokenizer_file_path = self.tokenizer_file_loader.load().await?;
 
-        let tokenizer =
-            tokenizers::Tokenizer::from_file(tokenizer_file_path).map_err(anyhow::Error::msg)?;
+        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_file_path).map_err(|e| {
+            TransformersError::Tokenization(format!("Failed to load tokenizer: {e}"))
+        })?;
 
         Ok(tokenizer)
     }
@@ -152,7 +155,7 @@ impl GenerationConfigLoader {
         }
     }
 
-    pub async fn load(&self) -> anyhow::Result<GenerationConfig> {
+    pub async fn load(&self) -> Result<GenerationConfig> {
         let generation_config_file_path = self.generation_config_file_loader.load().await?;
 
         let generation_config_content = std::fs::read_to_string(generation_config_file_path)?;
@@ -160,16 +163,19 @@ impl GenerationConfigLoader {
         let raw: RawGenerationConfig = serde_json::from_str(&generation_config_content)?;
 
         let eos_token_ids = match raw.eos_token_ids {
-            Some(serde_json::Value::Number(n)) => vec![n
-                .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("Invalid EOS token ID"))?],
+            Some(serde_json::Value::Number(n)) => vec![n.as_u64().ok_or_else(|| {
+                TransformersError::ModelMetadata("Invalid EOS token ID".to_string())
+            })?],
             Some(serde_json::Value::Array(arr)) => arr
                 .into_iter()
                 .map(|v| {
-                    v.as_u64()
-                        .ok_or_else(|| anyhow::anyhow!("Invalid EOS token ID in array"))
+                    v.as_u64().ok_or_else(|| {
+                        TransformersError::ModelMetadata(
+                            "Invalid EOS token ID in array".to_string(),
+                        )
+                    })
                 })
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Result<Vec<_>>>()?,
             _ => Vec::new(),
         };
 
@@ -199,7 +205,7 @@ impl GgufModelLoader {
 
     pub async fn load(
         &self,
-    ) -> anyhow::Result<(std::fs::File, candle_core::quantized::gguf_file::Content)> {
+    ) -> Result<(std::fs::File, candle_core::quantized::gguf_file::Content)> {
         let model_file_path = self.model_file_loader.load().await?;
 
         let mut file = std::fs::File::open(&model_file_path)?;

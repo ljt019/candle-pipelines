@@ -1,6 +1,7 @@
 use super::model::{LanguageModelContext, TextGenerationModel};
 use super::params::{apply_repeat_penalty, initialize_logits_processor, GenerationParams};
 use super::stats::GenerationStats;
+use crate::{Result, TransformersError};
 use candle_core::Tensor;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -23,7 +24,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         model: M,
         gen_params: GenerationParams,
         device: candle_core::Device,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let model_tokenizer = model.get_tokenizer().await?;
         let context = model.new_context();
 
@@ -71,7 +72,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         new_tokens.starts_with(&self.last_processed_tokens.lock().await)
     }
 
-    pub async fn completion_from_tokens(&self, input_tokens: &[u32]) -> anyhow::Result<String> {
+    pub async fn completion_from_tokens(&self, input_tokens: &[u32]) -> Result<String> {
         let (output, _) = self.completion_from_tokens_with_stats(input_tokens).await?;
         Ok(output)
     }
@@ -79,7 +80,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
     pub async fn completion_from_tokens_with_stats(
         &self,
         input_tokens: &[u32],
-    ) -> anyhow::Result<(String, GenerationStats)> {
+    ) -> Result<(String, GenerationStats)> {
         self.completion_from_tokens_with_prompt_stats(input_tokens, input_tokens.len())
             .await
     }
@@ -88,7 +89,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         &self,
         input_tokens: &[u32],
         prompt_token_count: usize,
-    ) -> anyhow::Result<(String, GenerationStats)> {
+    ) -> Result<(String, GenerationStats)> {
         const CHUNK_SIZE: usize = 64; // Must be <= initial kv cache size
 
         let params = self.gen_params.lock().await.clone();
@@ -123,7 +124,9 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         // Generate autoregressively
         let eos_tokens = self.model.lock().await.get_eos_tokens();
         if eos_tokens.is_empty() {
-            anyhow::bail!("Model provided no EOS tokens; cannot run text generation");
+            return Err(TransformersError::Generation(
+                "Model provided no EOS tokens; cannot run text generation".to_string(),
+            ));
         }
         for _ in 0..params.max_len {
             if eos_tokens.contains(&next_token) {
@@ -179,7 +182,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         input_tokens: Vec<u32>,
     ) -> (
         std::sync::Arc<std::sync::Mutex<GenerationStats>>,
-        impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
+        impl futures::Stream<Item = Result<String>> + Send + 'a,
     )
     where
         M: 'a + Send,
@@ -193,7 +196,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         prompt_token_count: Option<usize>,
     ) -> (
         std::sync::Arc<std::sync::Mutex<GenerationStats>>,
-        impl futures::Stream<Item = anyhow::Result<String>> + Send + 'a,
+        impl futures::Stream<Item = Result<String>> + Send + 'a,
     )
     where
         M: 'a + Send,
@@ -218,7 +221,9 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             let params = gen_params.lock().await.clone();
             let eos_tokens = model.lock().await.get_eos_tokens();
             if eos_tokens.is_empty() {
-                Err(anyhow::anyhow!("Model provided no EOS tokens; cannot stream text generation"))?;
+                Err(TransformersError::Generation(
+                    "Model provided no EOS tokens; cannot stream text generation".to_string(),
+                ))?;
             }
             const CHUNK_SIZE: usize = 64;
 
@@ -249,11 +254,15 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             stats_clone.lock().unwrap().record_token();
 
             if !eos_tokens.contains(&next_token) {
-                if let Some(chunk) = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))? {
+                if let Some(chunk) =
+                    dec_full.step(next_token).map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                {
                     yield chunk;
                 }
             } else {
-                let _ = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))?;
+                let _ = dec_full
+                    .step(next_token)
+                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?;
             }
 
             for _ in 0..params.max_len {
@@ -282,11 +291,16 @@ impl<M: TextGenerationModel> BasePipeline<M> {
                 stats_clone.lock().unwrap().record_token();
 
                 if !eos_tokens.contains(&next_token) {
-                    if let Some(chunk) = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))? {
+                    if let Some(chunk) = dec_full
+                        .step(next_token)
+                        .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                    {
                         yield chunk;
                     }
                 } else {
-                    let _ = dec_full.step(next_token).map_err(|e| anyhow::anyhow!(e))?;
+                    let _ = dec_full
+                        .step(next_token)
+                        .map_err(|e| TransformersError::Tokenization(e.to_string()))?;
                 }
             }
 

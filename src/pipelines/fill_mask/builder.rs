@@ -4,6 +4,7 @@ use crate::pipelines::cache::ModelOptions;
 use crate::pipelines::utils::{
     BasePipelineBuilder, DeviceRequest, DeviceSelectable, StandardPipelineBuilder,
 };
+use crate::Result;
 
 pub struct FillMaskPipelineBuilder<M: FillMaskModel>(StandardPipelineBuilder<M::Options>);
 
@@ -36,18 +37,15 @@ where
         &self.0.device_request
     }
 
-    fn create_model(options: Self::Options, device: candle_core::Device) -> anyhow::Result<M> {
+    fn create_model(options: Self::Options, device: candle_core::Device) -> Result<M> {
         M::new(options, device)
     }
 
-    fn get_tokenizer(options: Self::Options) -> anyhow::Result<tokenizers::Tokenizer> {
+    fn get_tokenizer(options: Self::Options) -> Result<tokenizers::Tokenizer> {
         M::get_tokenizer(options)
     }
 
-    fn construct_pipeline(
-        model: M,
-        tokenizer: tokenizers::Tokenizer,
-    ) -> anyhow::Result<Self::Pipeline> {
+    fn construct_pipeline(model: M, tokenizer: tokenizers::Tokenizer) -> Result<Self::Pipeline> {
         Ok(FillMaskPipeline { model, tokenizer })
     }
 }

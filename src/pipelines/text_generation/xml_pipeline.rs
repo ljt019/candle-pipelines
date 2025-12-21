@@ -4,7 +4,8 @@ use super::model::{LanguageModelContext, ToggleableReasoning};
 use super::params::GenerationParams;
 use super::parser::{Event, XmlParser};
 use super::pipeline::Input;
-use super::tools::{ErrorStrategy, Tool, ToolCalling};
+use super::tools::{ErrorStrategy, Tool, ToolCalling, ToolError};
+use crate::{Result, TransformersError};
 use async_stream::stream;
 use futures::Stream;
 use futures::StreamExt;
@@ -23,7 +24,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         gen_params: GenerationParams,
         xml_parser: XmlParser,
         device: candle_core::Device,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         Ok(Self {
             base: BasePipeline::new(model, gen_params, device).await?,
             xml_parser,
@@ -46,7 +47,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
 
     /// Generate a completion from either a prompt or a chat history.
     /// Returns a Vec<Event>.
-    pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> anyhow::Result<Vec<Event>> {
+    pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<Vec<Event>> {
         let text = match input.into() {
             Input::Prompt(p) => self.prompt_completion_internal(p).await?,
             Input::Messages(m) => self.message_completion_internal(m).await?,
@@ -55,7 +56,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         Ok(self.xml_parser.parse_complete(&text))
     }
 
-    async fn prompt_completion_internal(&self, prompt: &str) -> anyhow::Result<String> {
+    async fn prompt_completion_internal(&self, prompt: &str) -> Result<String> {
         // Reset context for fresh generation
         self.base.context.lock().await.reset();
 
@@ -70,24 +71,21 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
             .base
             .model_tokenizer
             .encode(templated_prompt, true)
-            .map_err(|e| anyhow::anyhow!(e))?
+            .map_err(|e| TransformersError::Tokenization(e.to_string()))?
             .get_ids()
             .to_vec();
 
         self.base.completion_from_tokens(&prompt_tokens).await
     }
 
-    async fn message_completion_internal(
-        &self,
-        messages: &[crate::Message],
-    ) -> anyhow::Result<String> {
+    async fn message_completion_internal(&self, messages: &[crate::Message]) -> Result<String> {
         let templated_prompt = self.base.model.lock().await.apply_chat_template(messages)?;
 
         let new_tokens = self
             .base
             .model_tokenizer
             .encode(templated_prompt, true)
-            .map_err(|e| anyhow::anyhow!(e))?
+            .map_err(|e| TransformersError::Tokenization(e.to_string()))?
             .get_ids()
             .to_vec();
 
@@ -126,7 +124,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
     pub async fn completion_stream<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
-    ) -> anyhow::Result<
+    ) -> Result<
         crate::pipelines::text_generation::streaming::EventStream<
             impl Stream<Item = Event> + Send + 'a,
         >,
@@ -144,7 +142,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated, true)
-                    .map_err(|e| anyhow::anyhow!(e))?
+                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?
                     .get_ids()
                     .to_vec();
 
@@ -156,7 +154,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated, true)
-                    .map_err(|e| anyhow::anyhow!(e))?
+                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?
                     .get_ids()
                     .to_vec();
 
@@ -218,29 +216,29 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
 
 // Implementations for models with ToggleableReasoning
 impl<M: TextGenerationModel + ToggleableReasoning> XmlGenerationPipeline<M> {
-    pub async fn set_reasoning(&self, enable: bool) -> anyhow::Result<()> {
+    pub async fn set_reasoning(&self, enable: bool) -> Result<()> {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
 // Implementations for models with ToolCalling
 impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
-    pub async fn unregister_tool(&self, name: &str) -> anyhow::Result<()> {
+    pub async fn unregister_tool(&self, name: &str) -> Result<()> {
         self.base.model.lock().await.unregister_tool(name)
     }
 
-    pub async fn clear_tools(&self) -> anyhow::Result<()> {
+    pub async fn clear_tools(&self) -> Result<()> {
         self.base.model.lock().await.clear_tools()
     }
 
-    pub async fn register_tools(&self, tools: Vec<Tool>) -> anyhow::Result<()> {
+    pub async fn register_tools(&self, tools: Vec<Tool>) -> Result<()> {
         for tool in tools {
             self.base.model.lock().await.register_tool(tool)?;
         }
         Ok(())
     }
 
-    pub async fn unregister_tools(&self, tools: Vec<Tool>) -> anyhow::Result<()> {
+    pub async fn unregister_tools(&self, tools: Vec<Tool>) -> Result<()> {
         for tool in tools {
             self.base.model.lock().await.unregister_tool(&tool.name)?;
         }
@@ -257,15 +255,17 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         &self,
         tool_calls: Vec<ToolCallInvocation>,
         tools: &[Tool],
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> Result<Vec<String>> {
         let mut tool_responses = Vec::new();
 
         for call in tool_calls {
             // Find the tool
-            let tool = tools
-                .iter()
-                .find(|t| t.name == call.name)
-                .ok_or_else(|| anyhow::anyhow!("Tool '{}' not found", call.name))?;
+            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+                TransformersError::Tool(ToolError::Message(format!(
+                    "Tool '{}' not found",
+                    call.name
+                )))
+            })?;
 
             // Execute the tool with retries
             let args = call.arguments.clone();
@@ -286,7 +286,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         attempts += 1;
                         if attempts >= tool.max_retries() {
                             match tool.error_strategy() {
-                                ErrorStrategy::Fail => return Err(anyhow::anyhow!(e)),
+                                ErrorStrategy::Fail => return Err(e.into()),
                                 ErrorStrategy::ReturnToModel => {
                                     // Also ensure error messages end with exactly one newline
                                     let error_msg = format!("Error: {e}");
@@ -312,10 +312,12 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
     pub async fn completion_with_tools<'a>(
         &self,
         input: impl Into<Input<'a>>,
-    ) -> anyhow::Result<Vec<Event>> {
+    ) -> Result<Vec<Event>> {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            anyhow::bail!("No tools registered. Call register_tools() first.");
+            return Err(TransformersError::Tool(ToolError::Message(
+                "No tools registered. Call register_tools() first.".to_string(),
+            )));
         }
 
         let mut messages = match input.into() {
@@ -337,7 +339,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                 .base
                 .model_tokenizer
                 .encode(templated, true)
-                .map_err(|e| anyhow::anyhow!(e))?
+                .map_err(|e| TransformersError::Tokenization(e.to_string()))?
                 .get_ids()
                 .to_vec();
 
@@ -400,14 +402,16 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
     pub async fn completion_stream_with_tools<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
-    ) -> anyhow::Result<
+    ) -> Result<
         crate::pipelines::text_generation::streaming::EventStream<
             impl Stream<Item = Event> + Send + 'a,
         >,
     > {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            anyhow::bail!("No tools registered. Call register_tools() first.");
+            return Err(TransformersError::Tool(ToolError::Message(
+                "No tools registered. Call register_tools() first.".to_string(),
+            )));
         }
 
         let initial_messages = match input.into() {
@@ -436,7 +440,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         .base
                         .model_tokenizer
                         .encode(templated, true)
-                        .map_err(|e| anyhow::anyhow!(e))
+                        .map_err(|e| TransformersError::Tokenization(e.to_string()))
                         .expect("failed to encode")
                         .get_ids()
                         .to_vec();
@@ -532,7 +536,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         Ok(crate::pipelines::text_generation::streaming::EventStream::new(event_stream))
     }
 
-    fn extract_tool_calls(text: &str) -> anyhow::Result<Vec<ToolCallInvocation>> {
+    fn extract_tool_calls(text: &str) -> Result<Vec<ToolCallInvocation>> {
         let tool_regex = Regex::new(r"(?s)<tool_call>(.*?)</tool_call>")?;
         let mut tool_calls = Vec::new();
 

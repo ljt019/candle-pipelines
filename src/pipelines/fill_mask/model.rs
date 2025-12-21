@@ -1,20 +1,17 @@
+use crate::Result;
 use tokenizers::Tokenizer;
 
 pub trait FillMaskModel {
     type Options: std::fmt::Debug + Clone;
 
-    fn new(options: Self::Options, device: candle_core::Device) -> anyhow::Result<Self>
+    fn new(options: Self::Options, device: candle_core::Device) -> Result<Self>
     where
         Self: Sized;
 
-    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> anyhow::Result<String>;
+    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String>;
 
     /// Predict for a batch of inputs, returning a result per item.
-    fn predict_batch(
-        &self,
-        tokenizer: &Tokenizer,
-        texts: &[&str],
-    ) -> anyhow::Result<Vec<anyhow::Result<String>>> {
+    fn predict_batch(&self, tokenizer: &Tokenizer, texts: &[&str]) -> Result<Vec<Result<String>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict(tokenizer, text))
@@ -29,7 +26,7 @@ pub trait FillMaskModel {
         tokenizer: &Tokenizer,
         text: &str,
         k: usize,
-    ) -> anyhow::Result<Vec<super::pipeline::FillMaskPrediction>> {
+    ) -> Result<Vec<super::pipeline::FillMaskPrediction>> {
         if k == 0 {
             return Ok(vec![]);
         }
@@ -46,14 +43,14 @@ pub trait FillMaskModel {
         tokenizer: &Tokenizer,
         texts: &[&str],
         k: usize,
-    ) -> anyhow::Result<Vec<anyhow::Result<Vec<super::pipeline::FillMaskPrediction>>>> {
+    ) -> Result<Vec<Result<Vec<super::pipeline::FillMaskPrediction>>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict_top_k(tokenizer, text, k))
             .collect())
     }
 
-    fn get_tokenizer(options: Self::Options) -> anyhow::Result<Tokenizer>;
+    fn get_tokenizer(options: Self::Options) -> Result<Tokenizer>;
 
     fn device(&self) -> &candle_core::Device;
 }

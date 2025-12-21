@@ -2,7 +2,6 @@
 //!
 //! Uses `candle_transformers::models::modernbert` for the underlying implementation.
 
-use anyhow::{Error as E, Result as AnyhowResult};
 use candle_core::{DType, Device, IndexOp, Tensor, D};
 use candle_nn::{ops::softmax, VarBuilder};
 use candle_transformers::models::modernbert::{
@@ -16,6 +15,7 @@ use tokenizers::Tokenizer;
 
 use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
+use crate::{Result, TransformersError};
 
 /// Available ModernBERT model sizes.
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +48,7 @@ pub struct FillMaskModernBertModel {
 }
 
 impl FillMaskModernBertModel {
-    pub fn new(size: ModernBertSize, device: Device) -> AnyhowResult<Self> {
+    pub fn new(size: ModernBertSize, device: Device) -> Result<Self> {
         let model_id = match size {
             ModernBertSize::Base => "answerdotai/ModernBERT-base",
             ModernBertSize::Large => "answerdotai/ModernBERT-large",
@@ -64,16 +64,18 @@ impl FillMaskModernBertModel {
         &self.device
     }
 
-    pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> AnyhowResult<String> {
+    pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         let encoding = tokenizer
             .encode(text, true)
-            .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
         let mask_id = tokenizer.token_to_id("[MASK]").unwrap_or(103);
         let mask_index = encoding
             .get_ids()
             .iter()
             .position(|&id| id == mask_id)
-            .ok_or_else(|| E::msg("No [MASK] token found in input"))?;
+            .ok_or_else(|| {
+                TransformersError::Generation("No [MASK] token found in input".to_string())
+            })?;
 
         let input_ids = Tensor::new(encoding.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -92,7 +94,7 @@ impl FillMaskModernBertModel {
         Ok(text.replace("[MASK]", &token_str))
     }
 
-    pub fn get_tokenizer(size: ModernBertSize) -> AnyhowResult<Tokenizer> {
+    pub fn get_tokenizer(size: ModernBertSize) -> Result<Tokenizer> {
         let repo_id = match size {
             ModernBertSize::Base => "answerdotai/ModernBERT-base",
             ModernBertSize::Large => "answerdotai/ModernBERT-large",
@@ -104,11 +106,11 @@ impl FillMaskModernBertModel {
 impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertModel {
     type Options = ModernBertSize;
 
-    fn new(options: Self::Options, device: Device) -> anyhow::Result<Self> {
+    fn new(options: Self::Options, device: Device) -> Result<Self> {
         FillMaskModernBertModel::new(options, device)
     }
 
-    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> AnyhowResult<String> {
+    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         self.predict(tokenizer, text)
     }
 
@@ -117,20 +119,22 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         tokenizer: &Tokenizer,
         text: &str,
         k: usize,
-    ) -> AnyhowResult<Vec<FillMaskPrediction>> {
+    ) -> Result<Vec<FillMaskPrediction>> {
         if k == 0 {
             return Ok(vec![]);
         }
 
         let encoding = tokenizer
             .encode(text, true)
-            .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
         let mask_id = tokenizer.token_to_id("[MASK]").unwrap_or(103);
         let mask_index = encoding
             .get_ids()
             .iter()
             .position(|&id| id == mask_id)
-            .ok_or_else(|| E::msg("No [MASK] token found in input"))?;
+            .ok_or_else(|| {
+                TransformersError::Generation("No [MASK] token found in input".to_string())
+            })?;
 
         let input_ids = Tensor::new(encoding.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -174,7 +178,7 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         tokenizer: &Tokenizer,
         texts: &[&str],
         k: usize,
-    ) -> AnyhowResult<Vec<AnyhowResult<Vec<FillMaskPrediction>>>> {
+    ) -> Result<Vec<Result<Vec<FillMaskPrediction>>>> {
         if texts.is_empty() || k == 0 {
             return Ok(texts.iter().map(|_| Ok(vec![])).collect());
         }
@@ -226,7 +230,11 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         if valid_indices.is_empty() {
             return Ok(error_messages
                 .into_iter()
-                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .map(|e| {
+                    Err(TransformersError::Generation(
+                        e.unwrap_or_else(|| "Unknown error".to_string()),
+                    ))
+                })
                 .collect());
         }
 
@@ -258,10 +266,10 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         let logits = self.model.forward(&input_ids, &attention_mask)?;
 
         // Extract predictions for each item
-        let mut results: Vec<AnyhowResult<Vec<FillMaskPrediction>>> = error_messages
+        let mut results: Vec<Result<Vec<FillMaskPrediction>>> = error_messages
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(E::msg(msg).into()),
+                Some(msg) => Err(TransformersError::Generation(msg)),
                 None => Ok(vec![]), // Placeholder, will be filled
             })
             .collect();
@@ -302,7 +310,7 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         Ok(results)
     }
 
-    fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
+    fn get_tokenizer(options: Self::Options) -> Result<Tokenizer> {
         Self::get_tokenizer(options)
     }
 
@@ -320,7 +328,7 @@ pub struct ZeroShotModernBertModel {
 }
 
 impl ZeroShotModernBertModel {
-    pub fn new(size: ModernBertSize, device: Device) -> AnyhowResult<Self> {
+    pub fn new(size: ModernBertSize, device: Device) -> Result<Self> {
         let model_id = match size {
             ModernBertSize::Base => "MoritzLaurer/ModernBERT-base-zeroshot-v2.0",
             ModernBertSize::Large => "MoritzLaurer/ModernBERT-large-zeroshot-v2.0",
@@ -345,7 +353,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
@@ -354,7 +362,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         let mut results = self.predict_raw(tokenizer, text, candidate_labels)?;
         let sum: f32 = results.iter().map(|(_, p)| p).sum();
         if sum > 0.0 {
@@ -370,7 +378,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         self.predict_raw(tokenizer, text, candidate_labels)
     }
 
@@ -379,22 +387,21 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         if candidate_labels.is_empty() {
             return Ok(vec![]);
         }
 
-        let entailment_id = *self
-            .label2id
-            .get("entailment")
-            .ok_or_else(|| E::msg("Config missing 'entailment' in label2id"))?;
+        let entailment_id = *self.label2id.get("entailment").ok_or_else(|| {
+            TransformersError::ModelMetadata("Config missing 'entailment' in label2id".to_string())
+        })?;
 
         let mut encodings = Vec::new();
         for &label in candidate_labels {
             let hypothesis = format!("This example is {label}.");
             let encoding = tokenizer
                 .encode((text, hypothesis.as_str()), true)
-                .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
+                .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
             encodings.push(encoding);
         }
 
@@ -451,7 +458,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
         if texts.is_empty() {
             return Ok(vec![]);
         }
@@ -459,10 +466,9 @@ impl ZeroShotModernBertModel {
             return Ok(texts.iter().map(|_| Ok(vec![])).collect());
         }
 
-        let entailment_id = *self
-            .label2id
-            .get("entailment")
-            .ok_or_else(|| E::msg("Config missing 'entailment' in label2id"))?;
+        let entailment_id = *self.label2id.get("entailment").ok_or_else(|| {
+            TransformersError::ModelMetadata("Config missing 'entailment' in label2id".to_string())
+        })?;
 
         let pad_token_id = tokenizer
             .get_padding()
@@ -507,7 +513,11 @@ impl ZeroShotModernBertModel {
         if valid_pair_indices.is_empty() {
             return Ok(error_messages
                 .into_iter()
-                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .map(|e| {
+                    Err(TransformersError::Generation(
+                        e.unwrap_or_else(|| "Unknown error".to_string()),
+                    ))
+                })
                 .collect());
         }
 
@@ -543,10 +553,10 @@ impl ZeroShotModernBertModel {
             .to_vec1::<f32>()?;
 
         // Map results back to original structure
-        let mut results: Vec<AnyhowResult<Vec<(String, f32)>>> = error_messages
+        let mut results: Vec<Result<Vec<(String, f32)>>> = error_messages
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(E::msg(msg).into()),
+                Some(msg) => Err(TransformersError::Generation(msg)),
                 None => Ok(vec![]), // Placeholder
             })
             .collect();
@@ -588,7 +598,7 @@ impl ZeroShotModernBertModel {
         Ok(results)
     }
 
-    pub fn get_tokenizer(size: ModernBertSize) -> AnyhowResult<Tokenizer> {
+    pub fn get_tokenizer(size: ModernBertSize) -> Result<Tokenizer> {
         let repo_id = match size {
             ModernBertSize::Base => "MoritzLaurer/ModernBERT-base-zeroshot-v2.0",
             ModernBertSize::Large => "MoritzLaurer/ModernBERT-large-zeroshot-v2.0",
@@ -600,7 +610,7 @@ impl ZeroShotModernBertModel {
 impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroShotModernBertModel {
     type Options = ModernBertSize;
 
-    fn new(options: Self::Options, device: Device) -> anyhow::Result<Self> {
+    fn new(options: Self::Options, device: Device) -> Result<Self> {
         ZeroShotModernBertModel::new(options, device)
     }
 
@@ -609,7 +619,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
@@ -619,7 +629,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
         let raw_results = self.predict_raw_batch(tokenizer, texts, candidate_labels)?;
 
         // Normalize each text's results (single-label: probabilities sum to 1)
@@ -644,7 +654,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<(String, f32)>> {
+    ) -> Result<Vec<(String, f32)>> {
         self.predict_raw(tokenizer, text, candidate_labels)
     }
 
@@ -654,11 +664,11 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> AnyhowResult<Vec<AnyhowResult<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
         self.predict_raw_batch(tokenizer, texts, candidate_labels)
     }
 
-    fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
+    fn get_tokenizer(options: Self::Options) -> Result<Tokenizer> {
         Self::get_tokenizer(options)
     }
 
@@ -676,7 +686,7 @@ pub struct SentimentModernBertModel {
 }
 
 impl SentimentModernBertModel {
-    pub fn new(size: ModernBertSize, device: Device) -> AnyhowResult<Self> {
+    pub fn new(size: ModernBertSize, device: Device) -> Result<Self> {
         let model_id = match size {
             ModernBertSize::Base => "clapAI/modernBERT-base-multilingual-sentiment",
             ModernBertSize::Large => "clapAI/modernBERT-large-multilingual-sentiment",
@@ -696,10 +706,10 @@ impl SentimentModernBertModel {
         &self.device
     }
 
-    pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> AnyhowResult<String> {
+    pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         let tokens = tokenizer
             .encode(text, true)
-            .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
 
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -711,13 +721,15 @@ impl SentimentModernBertModel {
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| E::msg(format!("Predicted ID '{pred_id}' not in id2label")))?
+            .ok_or_else(|| {
+                TransformersError::Generation(format!("Predicted ID '{pred_id}' not in id2label"))
+            })?
             .clone();
 
         Ok(label)
     }
 
-    pub fn get_tokenizer(size: ModernBertSize) -> AnyhowResult<Tokenizer> {
+    pub fn get_tokenizer(size: ModernBertSize) -> Result<Tokenizer> {
         let repo_id = match size {
             ModernBertSize::Base => "clapAI/modernBERT-base-multilingual-sentiment",
             ModernBertSize::Large => "clapAI/modernBERT-large-multilingual-sentiment",
@@ -729,22 +741,18 @@ impl SentimentModernBertModel {
 impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentModernBertModel {
     type Options = ModernBertSize;
 
-    fn new(options: Self::Options, device: Device) -> anyhow::Result<Self> {
+    fn new(options: Self::Options, device: Device) -> Result<Self> {
         SentimentModernBertModel::new(options, device)
     }
 
-    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> AnyhowResult<String> {
+    fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         self.predict(tokenizer, text)
     }
 
-    fn predict_with_score(
-        &self,
-        tokenizer: &Tokenizer,
-        text: &str,
-    ) -> AnyhowResult<SentimentResult> {
+    fn predict_with_score(&self, tokenizer: &Tokenizer, text: &str) -> Result<SentimentResult> {
         let tokens = tokenizer
             .encode(text, true)
-            .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
 
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -760,7 +768,9 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| E::msg(format!("Predicted ID '{pred_id}' not in id2label")))?
+            .ok_or_else(|| {
+                TransformersError::Generation(format!("Predicted ID '{pred_id}' not in id2label"))
+            })?
             .clone();
 
         Ok(SentimentResult { label, score })
@@ -771,7 +781,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         &self,
         tokenizer: &Tokenizer,
         texts: &[&str],
-    ) -> AnyhowResult<Vec<AnyhowResult<SentimentResult>>> {
+    ) -> Result<Vec<Result<SentimentResult>>> {
         if texts.is_empty() {
             return Ok(vec![]);
         }
@@ -807,7 +817,11 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         if valid_indices.is_empty() {
             return Ok(error_messages
                 .into_iter()
-                .map(|e| Err(E::msg(e.unwrap_or_else(|| "Unknown error".to_string())).into()))
+                .map(|e| {
+                    Err(TransformersError::Generation(
+                        e.unwrap_or_else(|| "Unknown error".to_string()),
+                    ))
+                })
                 .collect());
         }
 
@@ -842,10 +856,10 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let probs_2d = probs.to_vec2::<f32>()?;
 
         // Extract predictions for each item
-        let mut results: Vec<AnyhowResult<SentimentResult>> = error_messages
+        let mut results: Vec<Result<SentimentResult>> = error_messages
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(E::msg(msg).into()),
+                Some(msg) => Err(TransformersError::Generation(msg)),
                 None => Ok(SentimentResult {
                     label: String::new(),
                     score: 0.0,
@@ -868,8 +882,9 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                     });
                 }
                 None => {
-                    results[orig_idx] =
-                        Err(E::msg(format!("Predicted ID '{pred_id}' not in id2label")).into());
+                    results[orig_idx] = Err(TransformersError::Generation(format!(
+                        "Predicted ID '{pred_id}' not in id2label",
+                    )));
                 }
             }
         }
@@ -877,7 +892,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         Ok(results)
     }
 
-    fn get_tokenizer(options: Self::Options) -> AnyhowResult<Tokenizer> {
+    fn get_tokenizer(options: Self::Options) -> Result<Tokenizer> {
         Self::get_tokenizer(options)
     }
 
@@ -890,18 +905,15 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
 // Helper functions for loading models
 // ============================================================================
 
-fn load_tokenizer(repo_id: &str) -> AnyhowResult<Tokenizer> {
+fn load_tokenizer(repo_id: &str) -> Result<Tokenizer> {
     let api = Api::new()?;
     let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
     let tokenizer_path = repo.get("tokenizer.json")?;
     Tokenizer::from_file(tokenizer_path)
-        .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))
+        .map_err(|e| TransformersError::Tokenization(format!("Failed to load tokenizer: {e}")))
 }
 
-fn load_model_weights(
-    repo_id: &str,
-    device: &Device,
-) -> AnyhowResult<(Config, VarBuilder<'static>)> {
+fn load_model_weights(repo_id: &str, device: &Device) -> Result<(Config, VarBuilder<'static>)> {
     let api = Api::new()?;
     let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
 
@@ -964,7 +976,7 @@ fn patch_config_num_labels(config: &mut Config, num_labels: usize) {
 fn load_classifier_model(
     repo_id: &str,
     device: &Device,
-) -> AnyhowResult<(Config, VarBuilder<'static>, HashMap<String, u32>)> {
+) -> Result<(Config, VarBuilder<'static>, HashMap<String, u32>)> {
     let api = Api::new()?;
     let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
 
@@ -993,7 +1005,7 @@ fn load_classifier_model(
 fn load_classifier_model_with_id2label(
     repo_id: &str,
     device: &Device,
-) -> AnyhowResult<(Config, VarBuilder<'static>, HashMap<String, String>)> {
+) -> Result<(Config, VarBuilder<'static>, HashMap<String, String>)> {
     let api = Api::new()?;
     let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
 

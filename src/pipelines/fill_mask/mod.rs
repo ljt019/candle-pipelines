@@ -14,9 +14,7 @@
 //! ## Usage Example
 //!
 //! ```rust,no_run
-//! use anyhow::Result;
-//! use transformers::pipelines::fill_mask::*;
-//! use transformers::pipelines::utils::BasePipelineBuilder;
+//! use transformers::{pipelines::fill_mask::*, pipelines::utils::BasePipelineBuilder, Result};
 //!
 //! fn main() -> Result<()> {
 //!     // Create a fill-mask pipeline
@@ -43,5 +41,4 @@ pub use model::FillMaskModel;
 pub use pipeline::FillMaskPipeline;
 
 pub use crate::models::ModernBertSize;
-
-pub use anyhow::Result;
+pub use crate::Result;
