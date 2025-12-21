@@ -478,7 +478,9 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                 Ok(raw_call) => {
                     tool_calls.push(ToolCallInvocation {
                         name: raw_call.name,
-                        arguments: raw_call.arguments.unwrap_or_default(),
+                        arguments: raw_call
+                            .arguments
+                            .unwrap_or_else(|| serde_json::Value::Object(Default::default())),
                     });
                 }
                 Err(e) => {
@@ -495,10 +497,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
 struct RawToolCall {
     name: String,
     #[serde(default)]
-    arguments: Option<std::collections::HashMap<String, String>>,
+    arguments: Option<serde_json::Value>,
 }
 
 struct ToolCallInvocation {
     name: String,
-    arguments: std::collections::HashMap<String, String>,
+    arguments: serde_json::Value,
 }
