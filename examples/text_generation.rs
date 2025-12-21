@@ -45,5 +45,23 @@ async fn main() -> Result<()> {
     println!("\n=== Generated Text 3 (Follow-up) ===");
     println!("{}", completion);
 
+    // Batch inference: process multiple prompts at once
+    println!("\n=== Batch Inference ===");
+    let prompts = &[
+        "What is the capital of France?",
+        "Explain quantum computing in one sentence.",
+        "Write a haiku about Rust programming.",
+    ];
+
+    let results = pipeline.completion_batch(prompts).await?;
+
+    for (i, result) in results.into_iter().enumerate() {
+        println!("\n[Prompt {}]: {}", i + 1, prompts[i]);
+        match result {
+            Ok(completion) => println!("[Response]: {}", completion),
+            Err(e) => println!("[Error]: {}", e),
+        }
+    }
+
     Ok(())
 }

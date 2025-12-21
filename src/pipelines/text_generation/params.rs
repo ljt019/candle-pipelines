@@ -136,4 +136,3 @@ mod tests {
         assert_eq!(prs, vec![0.5, 0.3, 0.2]);
     }
 }
-

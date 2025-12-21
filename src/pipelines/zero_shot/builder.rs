@@ -55,11 +55,7 @@ where
     }
 }
 
-impl
-    ZeroShotClassificationPipelineBuilder<
-        crate::models::modernbert::ZeroShotModernBertModel,
-    >
-{
+impl ZeroShotClassificationPipelineBuilder<crate::models::modernbert::ZeroShotModernBertModel> {
     pub fn modernbert(size: crate::models::ModernBertSize) -> Self {
         Self::new(size)
     }

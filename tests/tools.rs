@@ -76,4 +76,3 @@ async fn tool_error_fail_strategy() -> anyhow::Result<()> {
     assert!(res.is_err());
     Ok(())
 }
-

@@ -54,11 +54,7 @@ where
     }
 }
 
-impl
-    SentimentAnalysisPipelineBuilder<
-        crate::models::modernbert::SentimentModernBertModel,
-    >
-{
+impl SentimentAnalysisPipelineBuilder<crate::models::modernbert::SentimentModernBertModel> {
     pub fn modernbert(size: crate::models::ModernBertSize) -> Self {
         Self::new(size)
     }

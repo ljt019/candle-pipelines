@@ -18,4 +18,3 @@ async fn sentiment_basic() -> anyhow::Result<()> {
     assert!(res.score >= 0.0 && res.score <= 1.0);
     Ok(())
 }
-

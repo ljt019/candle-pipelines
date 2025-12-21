@@ -18,4 +18,3 @@ async fn zero_shot_basic() -> anyhow::Result<()> {
     assert_eq!(res.len(), 2);
     Ok(())
 }
-

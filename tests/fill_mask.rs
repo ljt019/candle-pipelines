@@ -29,4 +29,3 @@ async fn fill_mask_empty_input_errors() -> anyhow::Result<()> {
     assert!(pipeline.predict("").is_err());
     Ok(())
 }
-

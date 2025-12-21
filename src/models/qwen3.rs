@@ -489,8 +489,8 @@ impl ToggleableReasoning for Qwen3Model {
     }
 }
 
-use crate::pipelines::text_generation::tools::ToolError;
 use crate::pipelines::text_generation::model::Tool;
+use crate::pipelines::text_generation::tools::ToolError;
 
 impl ToolCalling for Qwen3Model {
     fn register_tool(&mut self, tool: Tool) -> anyhow::Result<()> {

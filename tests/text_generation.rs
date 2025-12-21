@@ -58,4 +58,3 @@ async fn text_generation_params_update() -> anyhow::Result<()> {
     assert!(longer.len() >= short.len());
     Ok(())
 }
-
