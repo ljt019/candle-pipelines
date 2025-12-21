@@ -1,4 +1,5 @@
 use futures::Stream;
+use futures::StreamExt;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -24,7 +25,6 @@ impl<S> CompletionStream<S> {
     where
         S: Stream<Item = anyhow::Result<String>>,
     {
-        use futures::StreamExt;
         self.inner.as_mut().next().await
     }
 
@@ -33,7 +33,6 @@ impl<S> CompletionStream<S> {
     where
         S: Stream<Item = anyhow::Result<String>>,
     {
-        use futures::StreamExt;
         let mut out = String::new();
         while let Some(chunk) = self.inner.as_mut().next().await {
             out.push_str(&chunk?);
@@ -49,7 +48,6 @@ impl<S> CompletionStream<S> {
     where
         S: Stream<Item = anyhow::Result<String>>,
     {
-        use futures::StreamExt;
         let mut out = Vec::new();
         for _ in 0..n {
             match self.inner.as_mut().next().await {
@@ -66,7 +64,6 @@ impl<S> CompletionStream<S> {
         S: Stream<Item = anyhow::Result<String>>,
         F: FnMut(anyhow::Result<String>) -> T,
     {
-        use futures::StreamExt;
         CompletionStream::new(self.inner.map(f))
     }
 
@@ -76,7 +73,6 @@ impl<S> CompletionStream<S> {
         S: Stream<Item = anyhow::Result<String>>,
         F: FnMut(&anyhow::Result<String>) -> bool,
     {
-        use futures::StreamExt;
         CompletionStream::new(self.inner.filter(move |item| std::future::ready(f(item))))
     }
 
@@ -86,7 +82,6 @@ impl<S> CompletionStream<S> {
         S: Stream<Item = anyhow::Result<String>>,
         F: FnMut(T, anyhow::Result<String>) -> T,
     {
-        use futures::StreamExt;
         self.inner
             .fold(init, |acc, item| std::future::ready(f(acc, item)))
             .await

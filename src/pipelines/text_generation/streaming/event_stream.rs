@@ -1,5 +1,6 @@
-use crate::pipelines::text_generation::parser::Event;
+use crate::pipelines::text_generation::parser::{Event, TagParts};
 use futures::Stream;
+use futures::StreamExt;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -26,7 +27,6 @@ impl<S> EventStream<S> {
     where
         S: Stream<Item = Event>,
     {
-        use futures::StreamExt;
         self.inner.as_mut().next().await
     }
 
@@ -35,7 +35,6 @@ impl<S> EventStream<S> {
     where
         S: Stream<Item = Event>,
     {
-        use futures::StreamExt;
         let mut events = Vec::new();
         while let Some(event) = self.inner.as_mut().next().await {
             events.push(event);
@@ -48,8 +47,6 @@ impl<S> EventStream<S> {
     where
         S: Stream<Item = Event>,
     {
-        use crate::pipelines::text_generation::parser::TagParts;
-        use futures::StreamExt;
         let mut out = String::new();
         while let Some(event) = self.inner.as_mut().next().await {
             if event.part() == TagParts::Content {
@@ -64,7 +61,6 @@ impl<S> EventStream<S> {
     where
         S: Stream<Item = Event>,
     {
-        use futures::StreamExt;
         let mut events = Vec::new();
         for _ in 0..n {
             match self.inner.as_mut().next().await {
@@ -81,7 +77,6 @@ impl<S> EventStream<S> {
         S: Stream<Item = Event>,
         F: FnMut(&Event) -> bool,
     {
-        use futures::StreamExt;
         EventStream::new(self.inner.filter(move |item| std::future::ready(f(item))))
     }
 
@@ -91,7 +86,6 @@ impl<S> EventStream<S> {
         S: Stream<Item = Event>,
         F: FnMut(Event) -> T,
     {
-        use futures::StreamExt;
         EventStream::new(self.inner.map(f))
     }
 
@@ -109,7 +103,6 @@ impl<S> EventStream<S> {
     where
         S: Stream<Item = Event>,
     {
-        use crate::pipelines::text_generation::parser::TagParts;
         self.filter(|event| event.part() == TagParts::Content)
     }
 }

@@ -14,6 +14,9 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tokenizers::Tokenizer;
 
+use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
+use crate::pipelines::sentiment::pipeline::SentimentResult;
+
 /// Available ModernBERT model sizes.
 #[derive(Debug, Clone, Copy)]
 pub enum ModernBertSize {
@@ -114,9 +117,7 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         tokenizer: &Tokenizer,
         text: &str,
         k: usize,
-    ) -> AnyhowResult<Vec<crate::pipelines::fill_mask::pipeline::FillMaskPrediction>> {
-        use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
-
+    ) -> AnyhowResult<Vec<FillMaskPrediction>> {
         if k == 0 {
             return Ok(vec![]);
         }
@@ -427,9 +428,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         &self,
         tokenizer: &Tokenizer,
         text: &str,
-    ) -> AnyhowResult<crate::pipelines::sentiment::pipeline::SentimentResult> {
-        use crate::pipelines::sentiment::pipeline::SentimentResult;
-
+    ) -> AnyhowResult<SentimentResult> {
         let tokens = tokenizer
             .encode(text, true)
             .map_err(|e| E::msg(format!("Tokenization error: {e}")))?;
