@@ -2,12 +2,14 @@
 //!
 //! Rust pipelines for candle models. Like HuggingFace's `pipeline()` API.
 
+pub mod conversation;
 pub mod error;
 pub mod loaders;
 pub mod message;
 pub mod models;
 pub mod pipelines;
 
+pub use conversation::{Conversation, TruncationStrategy};
 pub use error::{Result, TransformersError};
 pub use message::{Message, MessageVecExt, Role};
 pub use models::{
