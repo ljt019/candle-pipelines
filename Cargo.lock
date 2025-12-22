@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "transformers"
-version = "0.0.14"
+version = "0.0.13"
 dependencies = [
  "aho-corasick",
  "async-stream",

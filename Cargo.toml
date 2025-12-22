@@ -1,7 +1,7 @@
 [package]
 name = "transformers"
 description = "Transformers provides a simple, intuitive interface for Rust developers who want to work with Large Language Models locally, powered by the Candle crate. It offers an API inspired by Python's Transformers, tailored for Rust developers."
-version = "0.0.14"
+version = "0.0.13"
 edition = "2021"
 license = "MIT OR Apache-2.0" 
 repository = "https://github.com/ljt019/transformers/"
