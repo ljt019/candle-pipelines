@@ -40,6 +40,12 @@ impl<'a> From<&'a Vec<crate::Message>> for Input<'a> {
     }
 }
 
+impl<'a> From<&'a String> for Input<'a> {
+    fn from(s: &'a String) -> Self {
+        Self::Prompt(s.as_str())
+    }
+}
+
 /// Text generation pipeline that outputs strings
 pub struct TextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
@@ -69,9 +75,32 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         self.base.set_generation_params(params).await;
     }
 
-    /// Return the maximum context length supported by the model.
+    /// Returns the maximum context length (in tokens) supported by the model.
+    ///
+    /// Use this to check if your prompt will fit before sending.
     pub async fn max_context_length(&self) -> usize {
         self.base.model.lock().await.get_max_seq_len()
+    }
+
+    /// Count tokens in a text without running generation.
+    ///
+    /// Useful for checking if input will fit within context limits.
+    pub fn count_tokens(&self, text: &str) -> Result<usize> {
+        let tokens = self
+            .base
+            .model_tokenizer
+            .encode(text, false)
+            .map_err(|e| TransformersError::Tokenization(e.to_string()))?;
+        Ok(tokens.get_ids().len())
+    }
+
+    /// Clear the KV cache and reset context position.
+    ///
+    /// Call this when starting a completely new conversation to ensure
+    /// no state from previous generations affects the new one.
+    pub async fn clear_cache(&self) {
+        self.base.context.lock().await.reset();
+        self.base.last_processed_tokens.lock().await.clear();
     }
 
     /// Generate a completion from either a prompt or a chat history.
