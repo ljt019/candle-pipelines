@@ -97,7 +97,7 @@ impl<Opts> StandardPipelineBuilder<Opts> {
     pub fn new(options: Opts) -> Self {
         Self {
             options,
-            device_request: DeviceRequest::Default,
+            device_request: DeviceRequest::Cpu,
         }
     }
 }

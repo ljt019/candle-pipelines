@@ -21,7 +21,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         Self {
             model_options: options,
             gen_params: GenerationParams::default(),
-            device_request: DeviceRequest::Default,
+            device_request: DeviceRequest::Cpu,
         }
     }
 

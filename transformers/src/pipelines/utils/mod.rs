@@ -9,12 +9,10 @@ pub use builder::{BasePipelineBuilder, StandardPipelineBuilder};
 /// Request for a specific device, used by pipeline builders.
 #[derive(Clone, Default)]
 pub enum DeviceRequest {
-    /// Use CUDA if available, otherwise CPU (default behavior).
+    /// Use CPU (default behavior, matches HuggingFace Python API).
     #[default]
-    Default,
-    /// Force CPU even if CUDA is available.
     Cpu,
-    /// Select a specific CUDA device by index.
+    /// Select a specific CUDA device by index. Errors if unavailable.
     Cuda(usize),
     /// Provide an already constructed device.
     Explicit(Device),
@@ -24,13 +22,6 @@ impl DeviceRequest {
     /// Resolve the request into an actual [`Device`].
     pub fn resolve(self) -> Result<Device> {
         match self {
-            DeviceRequest::Default => {
-                // Try CUDA 0, fall back to CPU
-                match CudaDevice::new_with_stream(0) {
-                    Ok(cuda) => Ok(Device::Cuda(cuda)),
-                    Err(_) => Ok(Device::Cpu),
-                }
-            }
             DeviceRequest::Cpu => Ok(Device::Cpu),
             DeviceRequest::Cuda(i) => {
                 CudaDevice::new_with_stream(i)
@@ -53,13 +44,15 @@ pub trait DeviceSelectable: Sized {
     /// Returns a mutable reference to the builder's internal [`DeviceRequest`].
     fn device_request_mut(&mut self) -> &mut DeviceRequest;
 
-    /// Force the pipeline to run on CPU.
+    /// Run the pipeline on CPU (this is the default).
     fn cpu(mut self) -> Self {
         *self.device_request_mut() = DeviceRequest::Cpu;
         self
     }
 
     /// Select a specific CUDA device by index.
+    ///
+    /// Returns an error at build time if the CUDA device is unavailable.
     fn cuda_device(mut self, index: usize) -> Self {
         *self.device_request_mut() = DeviceRequest::Cuda(index);
         self
