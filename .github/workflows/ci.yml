@@ -1,9 +1,13 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
 
-#env:
-#  CARGO_TERM_COLOR: always
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   fmt:
