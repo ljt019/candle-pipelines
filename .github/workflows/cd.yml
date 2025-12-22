@@ -34,9 +34,9 @@ jobs:
           elif echo "$output" | grep -q "already exists"; then
             echo "Version already exists, skipping"
             echo "published=false" >> $GITHUB_OUTPUT
-          else
-            echo "$output"
-            exit 1
+            else
+              echo "$output"
+              exit 1
           fi
 
   publish_transformers:
