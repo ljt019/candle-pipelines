@@ -1,6 +1,7 @@
-/target
+/target/
+/Cargo.lock
+
 .env
-review.md
 .vscode
 .claude
 
