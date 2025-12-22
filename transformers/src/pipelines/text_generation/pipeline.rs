@@ -14,12 +14,9 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
-/// Input for a text-generation request.
 #[derive(Debug, Clone)]
 pub enum Input<'a> {
-    /// A raw prompt string.
     Prompt(&'a str),
-    /// A sequence of chat messages.
     Messages(&'a [crate::Message]),
 }
 
@@ -47,7 +44,6 @@ impl<'a> From<&'a String> for Input<'a> {
     }
 }
 
-/// Text generation pipeline that outputs strings
 pub struct TextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
 }
@@ -63,7 +59,6 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         })
     }
 
-    /// Get the current position in the context (number of cached tokens)
     pub async fn context_position(&self) -> usize {
         self.base.context_position().await
     }
@@ -76,16 +71,10 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         self.base.set_generation_params(params).await;
     }
 
-    /// Returns the maximum context length (in tokens) supported by the model.
-    ///
-    /// Use this to check if your prompt will fit before sending.
     pub async fn max_context_length(&self) -> usize {
         self.base.model.lock().await.get_max_seq_len()
     }
 
-    /// Count tokens in a text without running generation.
-    ///
-    /// Useful for checking if input will fit within context limits.
     pub fn count_tokens(&self, text: &str) -> Result<usize> {
         let tokens = self
             .base
@@ -95,17 +84,11 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         Ok(tokens.get_ids().len())
     }
 
-    /// Clear the KV cache and reset context position.
-    ///
-    /// Call this when starting a completely new conversation to ensure
-    /// no state from previous generations affects the new one.
     pub async fn clear_cache(&self) {
         self.base.context.lock().await.reset();
         self.base.last_processed_tokens.lock().await.clear();
     }
 
-    /// Generate a completion from either a prompt or a chat history.
-    /// Returns a String.
     pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
         match input.into() {
             Input::Prompt(p) => self.prompt_completion_internal(p).await,
@@ -113,7 +96,6 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
-    /// Generate a completion and return generation statistics alongside the result.
     pub async fn completion_with_stats<'a>(
         &self,
         input: impl Into<Input<'a>>,
@@ -124,7 +106,6 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
-    /// Generate completions for a batch of prompts.
     pub async fn completion_batch<'a>(&self, prompts: &[&'a str]) -> Result<Vec<Result<String>>> {
         let mut outputs = Vec::with_capacity(prompts.len());
         for prompt in prompts {
@@ -133,17 +114,12 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         Ok(outputs)
     }
 
-    /// Generate chat completions for a batch of message histories.
-    ///
-    /// Each conversation is processed independently with a fresh context.
-    /// This ensures no KV cache or state is shared between batch items.
     pub async fn chat_batch(
         &self,
         conversations: &[&[crate::Message]],
     ) -> Result<Vec<Result<String>>> {
         let mut outputs = Vec::with_capacity(conversations.len());
         for messages in conversations {
-            // Explicitly reset context to ensure independence between batch items
             self.base.context.lock().await.reset();
             self.base.last_processed_tokens.lock().await.clear();
             outputs.push(self.message_completion_internal(messages).await);
@@ -160,7 +136,6 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         &self,
         prompt: &str,
     ) -> Result<(String, GenerationStats)> {
-        // Reset context for fresh generation
         self.base.context.lock().await.reset();
 
         let templated_prompt = self
@@ -205,16 +180,13 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .get_ids()
             .to_vec();
 
-        // Check if we need to reset due to context overflow
         let max_seq_len = self.base.model.lock().await.get_max_seq_len();
         let pending_tokens = new_tokens.len();
 
         if self.base.context.lock().await.position() + pending_tokens > max_seq_len {
-            // Context would overflow, reset and start fresh
             self.base.context.lock().await.reset();
             self.base.last_processed_tokens.lock().await.clear();
         } else if self.base.can_reuse_cache(&new_tokens).await {
-            // Cache prefix matches, only feed the suffix
             let prefix_len = self.base.last_processed_tokens.lock().await.len();
             let new_portion = &new_tokens[prefix_len..];
             let (response, stats) = self
@@ -222,27 +194,22 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                 .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())
                 .await?;
 
-            // Track only prompt tokens for next turn
             *self.base.last_processed_tokens.lock().await = new_tokens.clone();
             return Ok((response, stats));
         } else {
-            // Cache is invalid (conversation changed), reset
             self.base.context.lock().await.reset();
         }
 
-        // Process all tokens from scratch
         let (response, stats) = self
             .base
             .completion_from_tokens_with_prompt_stats(&new_tokens, new_tokens.len())
             .await?;
 
-        // Update tracking (prompt tokens only)
         *self.base.last_processed_tokens.lock().await = new_tokens;
 
         Ok((response, stats))
     }
 
-    /// Streaming version of completion
     pub async fn completion_stream<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -318,14 +285,12 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
     }
 }
 
-// Implementations for models with ToggleableReasoning
 impl<M: TextGenerationModel + ToggleableReasoning> TextGenerationPipeline<M> {
     pub async fn set_reasoning(&self, enable: bool) -> Result<()> {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
-// Implementations for models with ToolCalling
 impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
     pub async fn unregister_tool(&self, name: &str) -> Result<()> {
         self.base.model.lock().await.unregister_tool(name)
@@ -353,8 +318,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         self.base.model.lock().await.registered_tools()
     }
 
-    /// Execute a list of tool calls with retry logic and error handling
-    /// Returns a vector of formatted tool responses
     async fn execute_tool_calls(
         &self,
         tool_calls: Vec<ToolCallInvocation>,
@@ -363,7 +326,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         let mut tool_responses = Vec::new();
 
         for call in tool_calls {
-            // Find the tool
             let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
             let tool =
                 tools
@@ -374,14 +336,12 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                         available: available_tools,
                     })?;
 
-            // Execute the tool with retries
             let args = call.arguments.clone();
             let mut attempts = 0u32;
 
             loop {
                 match tool.call(args.clone()).await {
                     Ok(result) => {
-                        // Ensure tool result content ends with exactly one newline
                         let trimmed_result = result.trim_end_matches('\n');
                         tool_responses.push(format!(
                             "<tool_result name=\"{}\">\n{}\n</tool_result>",
@@ -395,7 +355,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                             match tool.error_strategy() {
                                 ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
-                                    // Also ensure error messages end with exactly one newline
                                     let error_msg = format!("Error: {e}");
                                     let trimmed_error = error_msg.trim_end_matches('\n');
                                     tool_responses.push(format!(
@@ -430,7 +389,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         let mut full_response = String::new();
 
         loop {
-            // Generate response
             let templated = self
                 .base
                 .model
@@ -445,7 +403,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                 .get_ids()
                 .to_vec();
 
-            // Check if we need to reset due to context overflow
             let max_seq_len = self.base.model.lock().await.get_max_seq_len();
             let pending_tokens = new_tokens.len();
 
@@ -467,19 +424,15 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                     res
                 };
 
-            // Check for tool calls
             match Self::extract_tool_calls(&response) {
                 Ok(tool_calls) if !tool_calls.is_empty() => {
-                    // Append the model's response (including tool calls)
                     full_response.push_str(&response);
                     full_response.push('\n');
                     messages.push(crate::Message::assistant(&response));
 
-                    // Execute tools and get responses
                     let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
                     let tool_response_text = tool_responses.join("\n");
 
-                    // Append tool results to the output
                     full_response.push('\n');
                     full_response.push_str(&tool_response_text);
                     full_response.push('\n');
@@ -488,7 +441,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                     continue;
                 }
                 _ => {
-                    // No tool calls, append final response and return
                     if !full_response.is_empty() {
                         full_response.push('\n');
                         full_response.push_str(&response);
@@ -528,13 +480,11 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
             let mut needs_spacing = false;
 
             loop {
-                // Add spacing before final response if needed
                 if needs_spacing {
                     yield "\n".to_string();
                     needs_spacing = false;
                 }
 
-                // Stream the response
                 {
                     let stream_stats = std::sync::Arc::clone(&stream_stats_inner);
                     let stream_inner = self.completion_stream(&messages[..]).await?;
@@ -551,27 +501,21 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                     }
                 }
 
-                // Check for tool calls in the complete response
                 match Self::extract_tool_calls(&response_buffer) {
                     Ok(tool_calls) if !tool_calls.is_empty() => {
-                        // Add assistant message with tool calls
                         messages.push(crate::Message::assistant(&response_buffer));
                         response_buffer.clear();
 
-                        // Execute tools
                         let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
                         let tool_response_text = tool_responses.join("\n");
 
-                                                // Yield the tool results to the stream
                         yield format!("\n\n{}\n", tool_response_text);
 
                         messages.push(crate::Message::user(&tool_response_text));
                         needs_spacing = true;
 
-                        // Continue to get the final response
                     }
                     _ => {
-                        // No tool calls, we're done
                         break;
                     }
                 }

@@ -1,6 +1,3 @@
-//! Integration tests for model caching
-//! Run with: cargo test --features integration
-
 #![cfg(feature = "integration")]
 
 use transformers::pipelines::cache::global_cache;
@@ -22,15 +19,12 @@ async fn pipelines_share_weights() -> transformers::Result<()> {
         pipelines.push(pipeline);
     }
 
-    // Only one model should be loaded
     assert_eq!(global_cache().len(), 1);
 
     let _ = pipelines[0].completion("Hello").await?;
 
-    // First pipeline advanced its context
     assert!(pipelines[0].context_position().await > 0);
 
-    // Other pipelines remain untouched
     for p in pipelines.iter().skip(1) {
         assert_eq!(p.context_position().await, 0);
     }

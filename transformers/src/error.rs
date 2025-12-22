@@ -1,9 +1,5 @@
 use thiserror::Error;
 
-// ============================================================================
-// DOWNLOAD ERRORS
-// ============================================================================
-
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum DownloadError {
@@ -24,10 +20,6 @@ pub enum DownloadError {
     #[error("Failed to initialize HuggingFace API: {reason}")]
     ApiInit { reason: String },
 }
-
-// ============================================================================
-// MODEL METADATA ERRORS
-// ============================================================================
 
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
@@ -56,7 +48,6 @@ pub enum ModelMetadataError {
     MissingEosTokens { model: String },
 }
 
-/// Helper to format available keys nicely (max 5, then "...")
 fn format_keys(keys: &[String]) -> String {
     if keys.len() <= 5 {
         keys.join(", ")
@@ -64,10 +55,6 @@ fn format_keys(keys: &[String]) -> String {
         format!("{}, ... ({} more)", keys[..5].join(", "), keys.len() - 5)
     }
 }
-
-// ============================================================================
-// CHAT TEMPLATE ERRORS
-// ============================================================================
 
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
@@ -86,10 +73,6 @@ pub enum ChatTemplateError {
     },
 }
 
-// ============================================================================
-// TOKENIZATION ERRORS
-// ============================================================================
-
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum TokenizationError {
@@ -98,7 +81,7 @@ pub enum TokenizationError {
 
     #[error("Tokenization failed on '{input_preview}': {reason}")]
     EncodeFailed {
-        input_preview: String, // first 50 chars
+        input_preview: String,
         reason: String,
     },
 
@@ -107,7 +90,6 @@ pub enum TokenizationError {
 }
 
 impl TokenizationError {
-    /// Create an encode error, truncating input to first 50 chars
     pub fn encode_failed(input: &str, reason: impl Into<String>) -> Self {
         let preview: String = input.chars().take(50).collect();
         Self::EncodeFailed {
@@ -116,10 +98,6 @@ impl TokenizationError {
         }
     }
 }
-
-// ============================================================================
-// GENERATION ERRORS
-// ============================================================================
 
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
@@ -142,10 +120,6 @@ pub enum GenerationError {
     #[error("Batch item {index} failed: {reason}")]
     BatchItemFailed { index: usize, reason: String },
 }
-
-// ============================================================================
-// TOOL ERRORS
-// ============================================================================
 
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
@@ -173,20 +147,12 @@ pub enum ToolError {
     SchemaError { name: String, reason: String },
 }
 
-// ============================================================================
-// DEVICE ERRORS
-// ============================================================================
-
 #[derive(Error, Debug, Clone)]
 #[non_exhaustive]
 pub enum DeviceError {
     #[error("Failed to init CUDA device {index}: {reason}. Try DeviceRequest::Cpu as fallback.")]
     CudaInitFailed { index: usize, reason: String },
 }
-
-// ============================================================================
-// MAIN ERROR ENUM
-// ============================================================================
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -212,7 +178,6 @@ pub enum TransformersError {
     #[error(transparent)]
     Device(#[from] DeviceError),
 
-    // Pass-through from dependencies - stored as strings to allow Clone on sub-errors
     #[error("Candle error: {0}")]
     Candle(String),
 
@@ -222,7 +187,6 @@ pub enum TransformersError {
     #[error("JSON error: {0}")]
     SerdeJson(String),
 
-    // JSON mode (may expand later)
     #[error("JSON schema error: {0}")]
     JsonSchema(String),
 
@@ -278,10 +242,6 @@ impl From<regex::Error> for TransformersError {
 mod tests {
     use super::*;
 
-    // ========================================================================
-    // DOWNLOAD ERROR TESTS
-    // ========================================================================
-
     #[test]
     fn download_failed_includes_context() {
         let err = DownloadError::Failed {
@@ -307,10 +267,6 @@ mod tests {
 
         assert!(msg.contains("3 attempt"));
     }
-
-    // ========================================================================
-    // MODEL METADATA ERROR TESTS
-    // ========================================================================
 
     #[test]
     fn missing_key_shows_available() {
@@ -338,10 +294,6 @@ mod tests {
         assert!(msg.contains("positive"));
     }
 
-    // ========================================================================
-    // TOKENIZATION ERROR TESTS
-    // ========================================================================
-
     #[test]
     fn encode_failed_truncates_long_input() {
         let long_input = "a".repeat(200);
@@ -367,10 +319,6 @@ mod tests {
         assert!(msg.contains("file not found"));
     }
 
-    // ========================================================================
-    // GENERATION ERROR TESTS
-    // ========================================================================
-
     #[test]
     fn max_tokens_shows_limits() {
         let err = GenerationError::MaxTokensReached {
@@ -393,10 +341,6 @@ mod tests {
         assert!(msg.contains("The quick brown fox"));
         assert!(msg.contains("[MASK]"));
     }
-
-    // ========================================================================
-    // TOOL ERROR TESTS
-    // ========================================================================
 
     #[test]
     fn tool_not_found_shows_available() {
@@ -429,10 +373,6 @@ mod tests {
         assert!(err.to_string().contains("register_tools()"));
     }
 
-    // ========================================================================
-    // DEVICE ERROR TESTS
-    // ========================================================================
-
     #[test]
     fn cuda_init_suggests_fallback() {
         let err = DeviceError::CudaInitFailed {
@@ -444,10 +384,6 @@ mod tests {
         assert!(msg.contains("device 0"));
         assert!(msg.contains("DeviceRequest::Cpu"));
     }
-
-    // ========================================================================
-    // TRANSFORMERS ERROR CONVERSIONS
-    // ========================================================================
 
     #[test]
     fn download_error_converts() {
@@ -468,10 +404,6 @@ mod tests {
         assert!(matches!(err, TransformersError::Tool(_)));
     }
 
-    // ========================================================================
-    // NON-EXHAUSTIVE BEHAVIOR
-    // ========================================================================
-
     #[test]
     fn match_requires_wildcard() {
         let err = DownloadError::Failed {
@@ -480,11 +412,10 @@ mod tests {
             reason: "z".into(),
         };
 
-        // This compiles because we have _ arm (required by #[non_exhaustive])
         let msg = match err {
             DownloadError::Failed { reason, .. } => reason,
             DownloadError::Timeout { .. } => "timeout".into(),
-            _ => "other".into(), // Required!
+            _ => "other".into(),
         };
 
         assert_eq!(msg, "z");

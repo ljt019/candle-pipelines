@@ -1,7 +1,3 @@
-//! # Transformers
-//!
-//! Rust pipelines for candle models. Like HuggingFace's `pipeline()` API.
-
 pub mod error;
 pub mod loaders;
 pub mod message;

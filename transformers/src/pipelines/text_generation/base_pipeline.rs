@@ -8,7 +8,6 @@ use std::sync::Arc;
 use tokenizers::Tokenizer;
 use tokio::sync::Mutex;
 
-/// Base structure containing common fields for both pipeline types
 pub struct BasePipeline<M: TextGenerationModel> {
     pub model: Arc<Mutex<M>>,
     pub model_tokenizer: Tokenizer,
@@ -29,7 +28,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         let model_tokenizer = model.get_tokenizer().await?;
         let context = model.new_context();
 
-        // Collect textual forms of special tokens for display filtering
         let mut special_strings: std::collections::HashSet<String> = model_tokenizer
             .get_added_tokens_decoder()
             .values()
@@ -37,7 +35,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             .map(|tok| tok.content.clone())
             .collect();
 
-        // Add standard special tokens that might not be in the decoder
         special_strings.insert("<|im_start|>".to_string());
         special_strings.insert("<|im_end|>".to_string());
         special_strings.insert("<|im_sep|>".to_string());
@@ -54,7 +51,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         })
     }
 
-    /// Get the current position in the context (number of cached tokens)
     pub async fn context_position(&self) -> usize {
         self.context.lock().await.position()
     }
@@ -68,8 +64,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
     }
 
     pub async fn can_reuse_cache(&self, new_tokens: &[u32]) -> bool {
-        // Cache can be reused if the new prompt begins with the exact token
-        // sequence that is already cached.
         new_tokens.starts_with(&self.last_processed_tokens.lock().await)
     }
 
@@ -91,7 +85,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         input_tokens: &[u32],
         prompt_token_count: usize,
     ) -> Result<(String, GenerationStats)> {
-        const CHUNK_SIZE: usize = 64; // Must be <= initial kv cache size
+        const CHUNK_SIZE: usize = 64;
 
         let params = self.gen_params.lock().await.clone();
 
@@ -101,7 +95,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         let mut stats = GenerationStats::new();
         stats.set_prompt_tokens(prompt_token_count);
 
-        // Feed the initial prompt in manageable chunks to allow the KV cache to grow.
         let mut idx = 0;
         let mut last_logits = None;
         while idx < input_tokens.len() {
@@ -117,12 +110,10 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             idx = end;
         }
 
-        // Safety: there is always at least one chunk, so last_logits is Some
         let mut next_token = logits_processor.sample(&last_logits.expect("missing logits"))?;
         generated_tokens.push(next_token);
         stats.record_token();
 
-        // Generate autoregressively
         let eos_tokens = self.model.lock().await.get_eos_tokens();
         if eos_tokens.is_empty() {
             return Err(GenerationError::NoEosTokens.into());
@@ -153,14 +144,12 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             stats.record_token();
         }
 
-        // Filter out EOS tokens before decoding
         let eos_tokens = self.model.lock().await.get_eos_tokens();
         let filtered_tokens: Vec<u32> = generated_tokens
             .into_iter()
             .filter(|&token| !eos_tokens.contains(&token))
             .collect();
 
-        // Fast multi-token decode in a single call instead of per-token concat
         let generated_tokens_str = self
             .model_tokenizer
             .decode(&filtered_tokens, /*skip_special_tokens=*/ true)
@@ -175,7 +164,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         Ok((generated_tokens_str, stats))
     }
 
-    /// Stream tokens from the model given input tokens.
     pub fn token_stream<'a>(
         &'a self,
         input_tokens: Vec<u32>,
@@ -200,7 +188,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
     where
         M: 'a + Send,
     {
-        // Capture everything the async generator needs by value
         let device = self.device.clone();
         let model = std::sync::Arc::clone(&self.model);
         let tokenizer = self.model_tokenizer.clone();

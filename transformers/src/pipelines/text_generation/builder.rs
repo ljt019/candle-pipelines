@@ -9,7 +9,6 @@ use super::parser::XmlParserBuilder;
 use super::pipeline::TextGenerationPipeline;
 use super::xml_pipeline::XmlGenerationPipeline;
 
-/// Builder for text generation pipelines.
 pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
     model_options: M::Options,
     gen_params: GenerationParams,

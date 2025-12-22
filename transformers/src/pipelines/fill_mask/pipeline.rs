@@ -15,7 +15,6 @@ pub struct FillMaskPipeline<M: FillMaskModel> {
 }
 
 impl<M: FillMaskModel> FillMaskPipeline<M> {
-    /// Return the top prediction for the masked token
     pub fn predict(&self, text: &str) -> Result<FillMaskPrediction> {
         let predictions = self.predict_top_k(text, 1)?;
         predictions
@@ -24,7 +23,6 @@ impl<M: FillMaskModel> FillMaskPipeline<M> {
             .ok_or_else(|| GenerationError::NoPredictions.into())
     }
 
-    /// Return the top prediction for each input in the batch.
     pub fn predict_batch(&self, texts: &[&str]) -> Result<Vec<Result<FillMaskPrediction>>> {
         let batched = self.predict_top_k_batch(texts, 1)?;
         Ok(batched
@@ -40,12 +38,10 @@ impl<M: FillMaskModel> FillMaskPipeline<M> {
             .collect::<Vec<_>>())
     }
 
-    /// Return top-k predictions with scores for ranking/choice
     pub fn predict_top_k(&self, text: &str, k: usize) -> Result<Vec<FillMaskPrediction>> {
         self.model.predict_top_k(&self.tokenizer, text, k)
     }
 
-    /// Return the top-k predictions for each input in the batch.
     pub fn predict_top_k_batch(
         &self,
         texts: &[&str],

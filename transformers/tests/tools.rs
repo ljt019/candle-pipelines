@@ -1,6 +1,3 @@
-//! Integration tests for tool calling functionality
-//! Run with: cargo test --features integration
-
 #![cfg(feature = "integration")]
 
 use transformers::pipelines::text_generation::*;

@@ -14,7 +14,6 @@ pub struct ZeroShotClassificationPipeline<M: ZeroShotClassificationModel> {
 }
 
 impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
-    /// Classify with normalized probabilities for single-label classification (probabilities sum to 1)
     pub fn classify(
         &self,
         text: &str,
@@ -29,7 +28,6 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
             .collect())
     }
 
-    /// Classify a batch of inputs with normalized probabilities for single-label classification.
     pub fn classify_batch(
         &self,
         texts: &[&str],
@@ -52,7 +50,6 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
             .collect())
     }
 
-    /// Classify with raw entailment probabilities for multi-label classification
     pub fn classify_multi_label(
         &self,
         text: &str,
@@ -67,7 +64,6 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipeline<M> {
             .collect())
     }
 
-    /// Classify a batch of inputs with raw entailment probabilities for multi-label classification.
     pub fn classify_multi_label_batch(
         &self,
         texts: &[&str],

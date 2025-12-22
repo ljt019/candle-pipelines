@@ -1,7 +1,3 @@
-//! ModernBERT model wrappers for fill-mask, sentiment, and zero-shot pipelines.
-//!
-//! Uses `candle_transformers::models::modernbert` for the underlying implementation.
-
 use candle_core::{DType, Device, IndexOp, Tensor, D};
 use candle_nn::{ops::softmax, VarBuilder};
 use candle_transformers::models::modernbert::{
@@ -18,7 +14,6 @@ use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
 use crate::{Result, TransformersError};
 
-/// Available ModernBERT model sizes.
 #[derive(Debug, Clone, Copy)]
 pub enum ModernBertSize {
     Base,
@@ -41,7 +36,6 @@ impl crate::pipelines::cache::ModelOptions for ModernBertSize {
     }
 }
 
-/// Fill-mask model using ModernBERT.
 #[derive(Clone)]
 pub struct FillMaskModernBertModel {
     model: CandleModernBertForMaskedLM,
@@ -179,7 +173,6 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         Ok(out)
     }
 
-    /// True batched inference: tokenize all inputs, pad, run single forward pass.
     fn predict_top_k_batch(
         &self,
         tokenizer: &Tokenizer,
@@ -198,7 +191,6 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
             .or_else(|| tokenizer.token_to_id("[PAD]"))
             .unwrap_or(0);
 
-        // Tokenize all inputs and find mask positions
         let mut encodings = Vec::with_capacity(texts.len());
         let mut mask_indices = Vec::with_capacity(texts.len());
         let mut error_results: Vec<Option<TransformersError>> =
@@ -235,7 +227,6 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
             }
         }
 
-        // Find valid encodings for batching
         let valid_indices: Vec<usize> = encodings
             .iter()
             .enumerate()
@@ -249,7 +240,6 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
                 .collect());
         }
 
-        // Pad and batch valid encodings
         let valid_encodings: Vec<_> = valid_indices
             .iter()
             .map(|&i| encodings[i].as_ref().unwrap())
@@ -273,15 +263,13 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         let attention_mask =
             Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
 
-        // Single forward pass for entire batch
         let logits = self.model.forward(&input_ids, &attention_mask)?;
 
-        // Extract predictions for each item
         let mut results: Vec<Result<Vec<FillMaskPrediction>>> = error_results
             .into_iter()
             .map(|e| match e {
                 Some(err) => Err(err),
-                None => Ok(vec![]), // Placeholder, will be filled
+                None => Ok(vec![]),
             })
             .collect();
 
@@ -330,7 +318,6 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
     }
 }
 
-/// Zero-shot classification model using ModernBERT.
 #[derive(Clone)]
 pub struct ZeroShotModernBertModel {
     model: CandleModernBertForSequenceClassification,
@@ -469,7 +456,6 @@ impl ZeroShotModernBertModel {
         Ok(results)
     }
 
-    /// True batched inference: batch all (text, label) pairs across all texts in single forward pass.
     fn predict_raw_batch(
         &self,
         tokenizer: &Tokenizer,
@@ -502,8 +488,6 @@ impl ZeroShotModernBertModel {
 
         let num_labels = candidate_labels.len();
 
-        // Tokenize all (text, label) pairs
-        // Layout: [text0_label0, text0_label1, ..., text1_label0, text1_label1, ...]
         let mut all_encodings = Vec::with_capacity(texts.len() * num_labels);
         let mut error_results: Vec<Option<TransformersError>> =
             (0..texts.len()).map(|_| None).collect();
@@ -528,7 +512,6 @@ impl ZeroShotModernBertModel {
             }
         }
 
-        // Find valid pairs for batching
         let valid_pair_indices: Vec<usize> = all_encodings
             .iter()
             .enumerate()
@@ -542,7 +525,6 @@ impl ZeroShotModernBertModel {
                 .collect());
         }
 
-        // Pad and batch valid encodings
         let valid_encodings: Vec<_> = valid_pair_indices
             .iter()
             .map(|&i| all_encodings[i].as_ref().unwrap())
@@ -566,30 +548,26 @@ impl ZeroShotModernBertModel {
         let attention_mask =
             Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
 
-        // Single forward pass for entire batch
         let logits = self.model.forward(&input_ids, &attention_mask)?;
         let probabilities = softmax(&logits, D::Minus1)?;
         let entailment_probs = probabilities
             .i((.., entailment_id as usize))?
             .to_vec1::<f32>()?;
 
-        // Map results back to original structure
         let mut results: Vec<Result<Vec<(String, f32)>>> = error_results
             .into_iter()
             .map(|e| match e {
                 Some(err) => Err(err),
-                None => Ok(vec![]), // Placeholder
+                None => Ok(vec![]),
             })
             .collect();
 
-        // Create a mapping from valid_pair_indices back to (text_idx, label_idx)
         let mut valid_idx_to_prob: std::collections::HashMap<usize, f32> =
             std::collections::HashMap::new();
         for (batch_idx, &pair_idx) in valid_pair_indices.iter().enumerate() {
             valid_idx_to_prob.insert(pair_idx, entailment_probs[batch_idx]);
         }
 
-        // Build results for each text
         for text_idx in 0..texts.len() {
             if results[text_idx].is_err() {
                 continue;
@@ -613,7 +591,6 @@ impl ZeroShotModernBertModel {
                     .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                 results[text_idx] = Ok(text_results);
             }
-            // If not all_valid, the error was already set
         }
 
         Ok(results)
@@ -644,7 +621,6 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
-    /// True batched inference: batch all (text, label) pairs across all texts.
     fn predict_batch(
         &self,
         tokenizer: &Tokenizer,
@@ -653,7 +629,6 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
     ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
         let raw_results = self.predict_raw_batch(tokenizer, texts, candidate_labels)?;
 
-        // Normalize each text's results (single-label: probabilities sum to 1)
         Ok(raw_results
             .into_iter()
             .map(|result| {
@@ -679,7 +654,6 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         self.predict_raw(tokenizer, text, candidate_labels)
     }
 
-    /// True batched inference for multi-label: batch all (text, label) pairs.
     fn predict_multi_label_batch(
         &self,
         tokenizer: &Tokenizer,
@@ -698,7 +672,6 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
     }
 }
 
-/// Sentiment analysis model using ModernBERT.
 #[derive(Clone)]
 pub struct SentimentModernBertModel {
     model: CandleModernBertForSequenceClassification,
@@ -801,7 +774,6 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         Ok(SentimentResult { label, score })
     }
 
-    /// True batched inference: tokenize all inputs, pad, run single forward pass.
     fn predict_with_score_batch(
         &self,
         tokenizer: &Tokenizer,
@@ -818,7 +790,6 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
             .or_else(|| tokenizer.token_to_id("[PAD]"))
             .unwrap_or(0);
 
-        // Tokenize all inputs
         let mut encodings = Vec::with_capacity(texts.len());
         let mut error_results: Vec<Option<TransformersError>> =
             (0..texts.len()).map(|_| None).collect();
@@ -834,7 +805,6 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
             }
         }
 
-        // Find valid encodings for batching
         let valid_indices: Vec<usize> = encodings
             .iter()
             .enumerate()
@@ -848,7 +818,6 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                 .collect());
         }
 
-        // Pad and batch valid encodings
         let valid_encodings: Vec<_> = valid_indices
             .iter()
             .map(|&i| encodings[i].as_ref().unwrap())
@@ -872,13 +841,11 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let attention_mask =
             Tensor::from_vec(all_attention_masks, (batch_size, max_len), &self.device)?;
 
-        // Single forward pass for entire batch
         let logits = self.model.forward(&input_ids, &attention_mask)?;
         let probs = softmax(&logits, D::Minus1)?;
         let pred_ids = logits.argmax(D::Minus1)?.to_vec1::<u32>()?;
         let probs_2d = probs.to_vec2::<f32>()?;
 
-        // Extract predictions for each item
         let mut results: Vec<Result<SentimentResult>> = error_results
             .into_iter()
             .map(|e| match e {
@@ -886,7 +853,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                 None => Ok(SentimentResult {
                     label: String::new(),
                     score: 0.0,
-                }), // Placeholder
+                }),
             })
             .collect();
 
@@ -926,10 +893,6 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         &self.device
     }
 }
-
-// ============================================================================
-// Helper functions for loading models
-// ============================================================================
 
 fn load_tokenizer(repo_id: &str) -> Result<Tokenizer> {
     let api = Api::new()?;
@@ -973,13 +936,9 @@ struct ClassifierConfigJson {
     label2id: HashMap<String, u32>,
 }
 
-/// Workaround for candle's ClassifierConfig expecting label2id: HashMap<String, String>
-/// when actual HF configs have label2id: HashMap<String, i64>.
-/// We manually inject the correct num_labels.
 fn patch_config_num_labels(config: &mut Config, num_labels: usize) {
     use candle_transformers::models::modernbert::{ClassifierConfig, ClassifierPooling};
 
-    // If classifier_config is None or has wrong label count, create/update it
     if config.classifier_config.is_none()
         || config
             .classifier_config
@@ -988,7 +947,6 @@ fn patch_config_num_labels(config: &mut Config, num_labels: usize) {
             .unwrap_or(0)
             != num_labels
     {
-        // Create dummy id2label with correct count
         let id2label: HashMap<String, String> = (0..num_labels)
             .map(|i| (i.to_string(), format!("label_{i}")))
             .collect();
@@ -1021,7 +979,6 @@ fn load_classifier_model(
     let mut config: Config = serde_json::from_str(&config_str)?;
     let class_cfg: ClassifierConfigJson = serde_json::from_str(&config_str)?;
 
-    // Patch config with correct num_labels (workaround for candle's type mismatch)
     let num_labels = class_cfg.label2id.len().max(class_cfg.id2label.len());
     patch_config_num_labels(&mut config, num_labels);
 
@@ -1050,7 +1007,6 @@ fn load_classifier_model_with_id2label(
     let mut config: Config = serde_json::from_str(&config_str)?;
     let class_cfg: ClassifierConfigJson = serde_json::from_str(&config_str)?;
 
-    // Patch config with correct num_labels (workaround for candle's type mismatch)
     let num_labels = class_cfg.label2id.len().max(class_cfg.id2label.len());
     patch_config_num_labels(&mut config, num_labels);
 

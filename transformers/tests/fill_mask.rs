@@ -1,6 +1,3 @@
-//! Integration tests for fill mask pipeline
-//! Run with: cargo test --features integration
-
 #![cfg(feature = "integration")]
 
 use std::time::Instant;
@@ -46,27 +43,22 @@ fn fill_mask_batch_faster_than_sequential() -> transformers::Result<()> {
         "Coffee contains [MASK].",
     ];
 
-    // Warmup
     let _ = pipeline.predict(texts[0]);
 
-    // Sequential
     let start = Instant::now();
     let sequential_results: Vec<_> = texts.iter().map(|t| pipeline.predict(t)).collect();
     let sequential_time = start.elapsed();
 
-    // Batched
     let start = Instant::now();
     let batched_results = pipeline.predict_batch(&texts)?;
     let batched_time = start.elapsed();
 
-    // Verify correctness
     for (seq, batch) in sequential_results.iter().zip(batched_results.iter()) {
         let seq = seq.as_ref().unwrap();
         let batch = batch.as_ref().unwrap();
         assert_eq!(seq.word, batch.word, "Predicted words should match");
     }
 
-    // Verify batching is faster
     assert!(
         batched_time < sequential_time,
         "Batching should be faster: batched={:?}, sequential={:?}",

@@ -14,12 +14,10 @@ pub struct SentimentAnalysisPipeline<M: SentimentAnalysisModel> {
 }
 
 impl<M: SentimentAnalysisModel> SentimentAnalysisPipeline<M> {
-    /// Predict sentiment with structured result containing label and confidence score
     pub fn predict(&self, text: &str) -> Result<SentimentResult> {
         self.model.predict_with_score(&self.tokenizer, text)
     }
 
-    /// Predict sentiment for a batch of inputs.
     pub fn predict_batch(&self, texts: &[&str]) -> Result<Vec<Result<SentimentResult>>> {
         self.model.predict_with_score_batch(&self.tokenizer, texts)
     }

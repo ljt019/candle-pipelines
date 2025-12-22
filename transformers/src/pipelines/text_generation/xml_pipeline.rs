@@ -13,7 +13,6 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
-/// XML generation pipeline that outputs parsed Events
 pub struct XmlGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
     xml_parser: XmlParser,
@@ -32,7 +31,6 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         })
     }
 
-    /// Get the current position in the context (number of cached tokens)
     pub async fn context_position(&self) -> usize {
         self.base.context_position().await
     }
@@ -41,13 +39,10 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         self.base.set_generation_params(params).await;
     }
 
-    /// Get a reference to the XML parser
     pub fn xml_parser(&self) -> &XmlParser {
         &self.xml_parser
     }
 
-    /// Generate a completion from either a prompt or a chat history.
-    /// Returns a Vec<Event>.
     pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<Vec<Event>> {
         let text = match input.into() {
             Input::Prompt(p) => self.prompt_completion_internal(p).await?,
@@ -58,7 +53,6 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
     }
 
     async fn prompt_completion_internal(&self, prompt: &str) -> Result<String> {
-        // Reset context for fresh generation
         self.base.context.lock().await.reset();
 
         let templated_prompt = self
@@ -90,38 +84,30 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
             .get_ids()
             .to_vec();
 
-        // Check if we need to reset due to context overflow
         let max_seq_len = self.base.model.lock().await.get_max_seq_len();
         let pending_tokens = new_tokens.len();
 
         if self.base.context.lock().await.position() + pending_tokens > max_seq_len {
-            // Context would overflow, reset and start fresh
             self.base.context.lock().await.reset();
             self.base.last_processed_tokens.lock().await.clear();
         } else if self.base.can_reuse_cache(&new_tokens).await {
-            // Cache prefix matches, only feed the suffix
             let prefix_len = self.base.last_processed_tokens.lock().await.len();
             let new_portion = &new_tokens[prefix_len..];
             let response = self.base.completion_from_tokens(new_portion).await?;
 
-            // Track only prompt tokens for next turn
             *self.base.last_processed_tokens.lock().await = new_tokens;
             return Ok(response);
         } else {
-            // Cache is invalid (conversation changed), reset
             self.base.context.lock().await.reset();
         }
 
-        // Process all tokens from scratch
         let response = self.base.completion_from_tokens(&new_tokens).await?;
 
-        // Update tracking (prompt tokens only)
         *self.base.last_processed_tokens.lock().await = new_tokens;
 
         Ok(response)
     }
 
-    /// Streaming version of completion that yields Events
     pub async fn completion_stream<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -215,14 +201,12 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
     }
 }
 
-// Implementations for models with ToggleableReasoning
 impl<M: TextGenerationModel + ToggleableReasoning> XmlGenerationPipeline<M> {
     pub async fn set_reasoning(&self, enable: bool) -> Result<()> {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
-// Implementations for models with ToolCalling
 impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
     pub async fn unregister_tool(&self, name: &str) -> Result<()> {
         self.base.model.lock().await.unregister_tool(name)
@@ -250,8 +234,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         self.base.model.lock().await.registered_tools()
     }
 
-    /// Execute a list of tool calls with retry logic and error handling
-    /// Returns a vector of formatted tool responses
     async fn execute_tool_calls(
         &self,
         tool_calls: Vec<ToolCallInvocation>,
@@ -260,7 +242,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         let mut tool_responses = Vec::new();
 
         for call in tool_calls {
-            // Find the tool
             let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
             let tool =
                 tools
@@ -271,14 +252,12 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         available: available_tools,
                     })?;
 
-            // Execute the tool with retries
             let args = call.arguments.clone();
             let mut attempts = 0u32;
 
             loop {
                 match tool.call(args.clone()).await {
                     Ok(result) => {
-                        // Ensure tool result content ends with exactly one newline
                         let trimmed_result = result.trim_end_matches('\n');
                         tool_responses.push(format!(
                             "<tool_result name=\"{}\">\n{}\n</tool_result>",
@@ -292,7 +271,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                             match tool.error_strategy() {
                                 ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
-                                    // Also ensure error messages end with exactly one newline
                                     let error_msg = format!("Error: {e}");
                                     let trimmed_error = error_msg.trim_end_matches('\n');
                                     tool_responses.push(format!(
@@ -330,7 +308,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         let mut full_response = String::new();
 
         loop {
-            // Generate response
             let templated = self
                 .base
                 .model
@@ -345,7 +322,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                 .get_ids()
                 .to_vec();
 
-            // Check if we need to reset due to context overflow
             let max_seq_len = self.base.model.lock().await.get_max_seq_len();
             let pending_tokens = new_tokens.len();
 
@@ -367,18 +343,14 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                     res
                 };
 
-            // Check for tool calls
             match Self::extract_tool_calls(&response) {
                 Ok(tool_calls) if !tool_calls.is_empty() => {
-                    // Append the model's response (including tool calls)
                     full_response.push_str(&response);
                     messages.push(crate::Message::assistant(&response));
 
-                    // Execute tools and get responses
                     let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
                     let tool_response_text = tool_responses.join("\n");
 
-                    // Append tool results and ensure a single trailing newline for spacing
                     full_response.push('\n');
                     full_response.push_str(&tool_response_text);
                     full_response.push('\n');
@@ -387,9 +359,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                     continue;
                 }
                 _ => {
-                    // No tool calls, append final response and return
                     if !full_response.is_empty() {
-                        // Add a newline separator then the final response, but trim any leading newlines from the final response
                         full_response.push('\n');
                         full_response.push_str(response.trim_start_matches('\n'));
                         return Ok(self.xml_parser.parse_complete(&full_response));
@@ -423,12 +393,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
 
         let event_stream = stream! {
             let mut messages = initial_messages;
-            let mut raw_buffer = String::new();  // Keep raw text with tags
+            let mut raw_buffer = String::new();
 
             loop {
-                                // Stream the response
                 {
-                    // Generate tokens for current messages
                     let templated = self
                         .base
                         .model
@@ -445,7 +413,6 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         .to_vec();
                     let total_prompt_tokens = new_tokens.len();
 
-                    // Handle context overflow and caching
                     let max_seq_len = self.base.model.lock().await.get_max_seq_len();
                     let pending_tokens = new_tokens.len();
 
@@ -474,44 +441,36 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                             Ok(token) => {
                                 raw_buffer.push_str(&token);
 
-                                // Parse and yield events
                                 let events = xml_parser.parse_token(&token);
                                 for event in events {
                                     yield event;
                                 }
                             }
                             Err(_e) => {
-                                // Error in stream, break out
                                 break;
                             }
                         }
                     }
 
-                    // Flush any remaining events
                     let final_events = xml_parser.flush();
                     for event in final_events {
                         yield event;
                     }
                 }
 
-                // Check for tool calls in the complete raw response
                 match Self::extract_tool_calls(&raw_buffer) {
                     Ok(tool_calls) if !tool_calls.is_empty() => {
-                        // Add assistant message with tool calls
                         messages.push(crate::Message::assistant(&raw_buffer));
                         raw_buffer.clear();
 
-                        // Execute tools
                         let tool_responses = match self.execute_tool_calls(tool_calls, &tools).await {
                             Ok(responses) => responses,
                             Err(_e) => {
-                                // Error executing tools, break out
                                 break;
                             }
                         };
                         let tool_response_text = tool_responses.join("\n");
 
-                        // Parse and yield the tool results as events
                         let tool_events = xml_parser.parse_complete(&tool_response_text);
                         for event in tool_events {
                             yield event;
@@ -519,13 +478,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
 
                         messages.push(crate::Message::user(&tool_response_text));
 
-                        // Reset parser for next iteration
                         xml_parser.reset();
 
-                        // Continue to get the final response
                     }
                     _ => {
-                        // No tool calls, we're done
                         break;
                     }
                 }

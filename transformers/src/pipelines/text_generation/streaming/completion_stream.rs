@@ -26,9 +26,6 @@ impl<S> CompletionStream<S> {
         }
     }
 
-    /// Get the next chunk from the stream.
-    ///
-    /// Returns `None` when the stream is exhausted.
     pub async fn next(&mut self) -> Option<Result<String>>
     where
         S: Stream<Item = Result<String>>,
@@ -36,7 +33,6 @@ impl<S> CompletionStream<S> {
         self.inner.as_mut().next().await
     }
 
-    /// Collect the entire stream into a single `String`.
     pub async fn collect(mut self) -> Result<String>
     where
         S: Stream<Item = Result<String>>,
@@ -48,10 +44,6 @@ impl<S> CompletionStream<S> {
         Ok(out)
     }
 
-    /// Take up to `n` chunks from the stream.
-    ///
-    /// If the underlying stream ends before `n` chunks are yielded,
-    /// the returned vector will contain fewer elements.
     pub async fn take(mut self, n: usize) -> Result<Vec<String>>
     where
         S: Stream<Item = Result<String>>,
@@ -66,7 +58,6 @@ impl<S> CompletionStream<S> {
         Ok(out)
     }
 
-    /// Map each chunk in the stream through a function.
     pub fn map<F, T>(self, f: F) -> CompletionStream<impl Stream<Item = T>>
     where
         S: Stream<Item = Result<String>>,
@@ -75,7 +66,6 @@ impl<S> CompletionStream<S> {
         CompletionStream::new(self.inner.map(f), self.stats)
     }
 
-    /// Filter chunks in the stream based on a predicate.
     pub fn filter<F>(self, mut f: F) -> CompletionStream<impl Stream<Item = Result<String>>>
     where
         S: Stream<Item = Result<String>>,
@@ -87,7 +77,6 @@ impl<S> CompletionStream<S> {
         )
     }
 
-    /// Fold over the stream, producing a single value.
     pub async fn fold<T, F>(self, init: T, mut f: F) -> T
     where
         S: Stream<Item = Result<String>>,
@@ -98,9 +87,6 @@ impl<S> CompletionStream<S> {
             .await
     }
 
-    /// Return the generation statistics collected during streaming.
-    ///
-    /// Statistics are typically finalized once the stream has completed.
     pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
         self.stats.lock().unwrap().clone()
     }

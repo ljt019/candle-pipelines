@@ -10,7 +10,6 @@ pub trait FillMaskModel {
 
     fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String>;
 
-    /// Predict for a batch of inputs, returning a result per item.
     fn predict_batch(&self, tokenizer: &Tokenizer, texts: &[&str]) -> Result<Vec<Result<String>>> {
         Ok(texts
             .iter()
@@ -18,9 +17,6 @@ pub trait FillMaskModel {
             .collect())
     }
 
-    /// Return the top-k token predictions for the first `[MASK]` in `text`.
-    ///
-    /// Default implementation falls back to `predict` (single best) and assigns a score of 1.0.
     fn predict_top_k(
         &self,
         tokenizer: &Tokenizer,
@@ -37,7 +33,6 @@ pub trait FillMaskModel {
         }])
     }
 
-    /// Return top-k predictions for a batch of inputs, preserving per-item errors.
     fn predict_top_k_batch(
         &self,
         tokenizer: &Tokenizer,

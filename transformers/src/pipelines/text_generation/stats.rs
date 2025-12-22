@@ -2,21 +2,11 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct GenerationStats {
-    /// Number of tokens generated
     pub tokens_generated: usize,
-
-    /// Time from request start to first token
     pub time_to_first_token: Duration,
-
-    /// Total generation time
     pub total_time: Duration,
-
-    /// Tokens per second (tokens_generated / total_time)
     pub tokens_per_second: f64,
-
-    /// Number of prompt tokens (input)
     pub prompt_tokens: usize,
-
     start_time: Instant,
     first_token_time: Option<Instant>,
 }

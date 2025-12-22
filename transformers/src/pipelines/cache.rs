@@ -1,18 +1,14 @@
-//! Model caching utilities for sharing weights across multiple pipelines.
-
 use crate::Result;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-/// Trait implemented by model option types to generate a stable cache key.
 pub trait ModelOptions {
     fn cache_key(&self) -> String;
 }
 
 type CacheStorage = HashMap<(TypeId, String), Arc<dyn Any + Send + Sync>>;
 
-/// A thread-safe cache for model instances.
 pub struct ModelCache {
     cache: Arc<Mutex<CacheStorage>>,
 }
@@ -69,7 +65,6 @@ impl ModelCache {
         cache.is_empty()
     }
 
-    /// Async version for models with async constructors (e.g., TextGenerationModel).
     pub async fn get_or_create_async<M, Fut, F>(&self, key: &str, loader: F) -> Result<M>
     where
         M: Clone + Send + Sync + 'static,

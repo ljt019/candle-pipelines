@@ -1,48 +1,9 @@
-//! Model and tokenizer loading utilities for Hugging Face Hub integration.
-//!
-//! This module provides loaders for downloading and loading various AI model components
-//! from Hugging Face Hub, including:
-//! - Model weight files (GGUF format)
-//! - Tokenizers (JSON format)  
-//! - Generation configuration files
-//!
-//! ## Main Types
-//!
-//! - [`HfLoader`] - Generic Hugging Face file loader with retry logic
-//! - [`TokenizerLoader`] - Loads tokenizers from Hugging Face repositories
-//! - [`GenerationConfigLoader`] - Loads generation configuration files
-//! - [`GgufModelLoader`] - Loads GGUF format model weight files
-//!
-//! ## Usage Example
-//!
-//! ```rust,no_run
-//! use transformers::{Result, loaders::{GgufModelLoader, TokenizerLoader}};
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<()> {
-//!     // Load a tokenizer
-//!     let tokenizer_loader =
-//!         TokenizerLoader::new("microsoft/DialoGPT-small", "tokenizer.json");
-//!     let _tokenizer = tokenizer_loader.load().await?;
-//!
-//!     // Load model weights
-//!     let model_loader = GgufModelLoader::new("microsoft/DialoGPT-small", "model.gguf");
-//!     let (_file, _content) = model_loader.load().await?;
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! All loaders include built-in retry logic to handle temporary network issues
-//! and Hugging Face Hub lock acquisition failures.
-
 use serde::Deserialize;
 use tokio::time::Duration;
 
 use crate::error::{DownloadError, ModelMetadataError, TokenizationError};
 use crate::{Result, TransformersError};
 
-/// Configuration loaded from HuggingFace generation_config.json
 #[derive(Clone)]
 pub struct GenerationConfig {
     pub temperature: Option<f64>,
@@ -80,7 +41,6 @@ impl HfLoader {
         let hf_repo = self.repo.clone();
         let hf_api = hf_api.model(hf_repo);
 
-        // Retry logic for lock acquisition failures
         let max_retries = 3;
         let mut attempts = 0u32;
 
@@ -91,7 +51,6 @@ impl HfLoader {
                     let error_msg = e.to_string();
                     attempts = attempt + 1;
                     if error_msg.contains("Lock acquisition failed") && attempt < max_retries - 1 {
-                        // Wait before retrying, with exponential backoff
                         let wait_time = Duration::from_millis(100 * (1 << attempt));
                         tokio::time::sleep(wait_time).await;
                         continue;
@@ -106,7 +65,6 @@ impl HfLoader {
             }
         }
 
-        // If we exhausted all retries, return timeout error
         Err(DownloadError::Timeout {
             repo: self.repo.clone(),
             file: self.filename.clone(),

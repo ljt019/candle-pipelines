@@ -1,11 +1,8 @@
-//! Generation parameters and sampling for text generation.
-
 use candle_core::Tensor;
 use candle_transformers::generation::{LogitsProcessor as CandleLogitsProcessor, Sampling};
 
 pub use candle_transformers::utils::apply_repeat_penalty;
 
-/// Generation parameters for language models.
 #[derive(Debug, Clone)]
 pub struct GenerationParams {
     pub temperature: f64,
@@ -62,7 +59,6 @@ impl GenerationParams {
     }
 }
 
-/// Thin wrapper around Candle's LogitsProcessor to add min-p filtering.
 pub struct LogitsProcessor {
     inner: CandleLogitsProcessor,
     min_p: Option<f32>,

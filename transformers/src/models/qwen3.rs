@@ -1,7 +1,3 @@
-//! Qwen3 text generation implementation using candle-transformers.
-//!
-//! This implementation wraps candle-transformers' quantized Qwen3 for text generation.
-
 use candle_core::quantized::gguf_file;
 use candle_core::{DType, Device, Result as CandleResult, Tensor};
 use candle_transformers::models::quantized_qwen3 as candle_qwen3;
@@ -78,8 +74,6 @@ impl crate::pipelines::cache::ModelOptions for Qwen3Size {
 
 use crate::loaders::{GgufModelLoader, TokenizerLoader};
 
-/// High-level Qwen3 model interface for text generation.
-/// This struct manages the shared weights and creates individual contexts.
 #[derive(Clone)]
 pub struct Qwen3Model {
     weights: Arc<candle_qwen3::ModelWeights>,
@@ -91,9 +85,7 @@ pub struct Qwen3Model {
 }
 
 impl Qwen3Model {
-    /// Load and prepare the chat template environment
     async fn load_chat_template_env() -> Result<Arc<Environment<'static>>> {
-        // Load the tokenizer config and extract the chat template
         let tokenizer_config_loader =
             crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
 
@@ -109,30 +101,24 @@ impl Qwen3Model {
 
         let mut chat_template_owned = chat_template_str.to_string();
 
-        // Replace Python list reverse slice with Jinja filter
         chat_template_owned = chat_template_owned.replace("messages[::-1]", "messages|reverse");
 
-        // Patch known problematic arithmetic producing floats
         chat_template_owned = chat_template_owned.replace(
             "(messages|length - 1) - loop.index0",
             "((messages|length - 1)|int - loop.index0|int)",
         );
 
-        // Replace Python negative index access messages[-1] with explicit last element index
         chat_template_owned =
             chat_template_owned.replace("messages[-1]", "messages[(messages|length - 1)]");
 
-        // Build the MiniJinja environment with Python compatibility helpers
         let mut env = Environment::new();
         env.set_undefined_behavior(UndefinedBehavior::Lenient);
 
         add_to_environment(&mut env);
         env.set_unknown_method_callback(pycompat::unknown_method_callback);
 
-        // Ensure `tojson` filter is available (requires json feature)
         env.add_filter("tojson", minijinja::filters::tojson);
 
-        // Leak the string to get 'static lifetime - this is fine since we're storing it in the model
         let chat_template_static = Box::leak(chat_template_owned.into_boxed_str());
         env.add_template("chat", chat_template_static)
             .map_err(|e| ChatTemplateError::ParseFailed {
@@ -142,7 +128,6 @@ impl Qwen3Model {
 
         Ok(Arc::new(env))
     }
-    /// Load a Qwen3 model from a GGUF file.
     pub async fn from_gguf<R: Read + Seek>(reader: &mut R, device: &Device) -> Result<Self> {
         let content = gguf_file::Content::read(reader)?;
         let available_keys: Vec<String> = content.metadata.keys().cloned().collect();
@@ -200,15 +185,12 @@ impl Qwen3Model {
         })
     }
 
-    /// Load the model from hf
     pub async fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
         let (repo_id, file_name) = size.to_id();
 
-        // Download the model from hf
         let model_loader = GgufModelLoader::new(&repo_id, &file_name);
         let (mut file, content) = model_loader.load().await?;
 
-        // Download the tokenizer config from hf to get the eos token id
         let generation_config = crate::loaders::GenerationConfigLoader::new(
             "Qwen/Qwen3-0.6B",
             "generation_config.json",
@@ -265,32 +247,25 @@ impl Qwen3Model {
         })
     }
 
-    /// Get the models suggested tokenizer
     pub async fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new("Qwen/Qwen3-0.6B", "tokenizer.json");
         let tokenizer = tokenizer_loader.load().await?;
         Ok(tokenizer)
     }
 
-    /// Create a new inference context with this model.
-    /// Each context maintains its own KV cache and position tracking.
     pub fn new_context(&self) -> Context {
         Context::new(self.weights.clone(), self.info.clone())
     }
 
-    /// Create a new context with custom KV cache size.
     pub fn new_context_with_cache_size(&self, cache_size: usize) -> Context {
         Context::with_cache_size(self.weights.clone(), self.info.clone(), cache_size)
     }
 
-    /// Get model information.
     pub fn info(&self) -> ModelInfo {
         self.info.clone()
     }
 }
 
-/// A single inference context with independent state.
-/// Multiple contexts can share the same model weights.
 pub struct Context {
     weights: candle_qwen3::ModelWeights,
     info: ModelInfo,
@@ -298,7 +273,6 @@ pub struct Context {
 }
 
 impl Context {
-    /// Create a new context with shared weights.
     pub fn new(weights: Arc<candle_qwen3::ModelWeights>, info: ModelInfo) -> Self {
         let mut weights = (*weights).clone();
         weights.clear_kv_cache();
@@ -309,7 +283,6 @@ impl Context {
         }
     }
 
-    /// Kept for API compatibility; cache sizing is managed internally by Candle's implementation.
     pub fn with_cache_size(
         weights: Arc<candle_qwen3::ModelWeights>,
         info: ModelInfo,
@@ -318,18 +291,9 @@ impl Context {
         Self::new(weights, info)
     }
 
-    /// Generate next token logits given input token IDs.
-    /// Position is tracked automatically within this context.
-    ///
-    /// # Arguments
-    /// * `input_ids` - Token IDs with shape [batch_size, sequence_length]
-    ///
-    /// # Returns
-    /// Logits for next token prediction with shape [batch_size, vocab_size]
     pub fn generate(&mut self, input_ids: &Tensor) -> CandleResult<Tensor> {
         let seq_len = input_ids.dim(1)?;
 
-        // Starting a fresh sequence → ensure KV cache is empty.
         if self.position == 0 {
             self.weights.clear_kv_cache();
         }
@@ -339,29 +303,24 @@ impl Context {
         Ok(logits)
     }
 
-    /// Reset context state and position counter.
     pub fn reset(&mut self) {
         self.weights.clear_kv_cache();
         self.position = 0;
     }
 
-    /// Get current position in this context.
     pub fn current_position(&self) -> usize {
         self.position
     }
 
-    /// Manually set position (for advanced use cases).
     pub fn set_position(&mut self, position: usize) {
         self.position = position;
     }
 
-    /// Get model information.
     pub fn info(&self) -> ModelInfo {
         self.info.clone()
     }
 }
 
-/// Model information structure.
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
     pub num_layers: usize,
@@ -369,12 +328,6 @@ pub struct ModelInfo {
     pub dtype: DType,
     pub device: Device,
 }
-
-/*
-
-Pipeline Stuff
-
-*/
 
 use crate::pipelines::text_generation::model::{
     LanguageModelContext, TextGenerationModel, ToggleableReasoning, ToolCalling,
@@ -394,8 +347,6 @@ impl LanguageModelContext for Context {
     }
 
     fn can_continue_from(&self, position: usize) -> bool {
-        // Check if we can continue from the given position
-        // The cache is valid if the requested position matches our current position
         self.position == position
     }
 }
@@ -405,7 +356,6 @@ impl TextGenerationModel for Qwen3Model {
     type Options = Qwen3Size;
 
     fn get_eos_token(&self) -> Option<u32> {
-        // Return the first EOS token ID from the generation config
         self.generation_config
             .eos_token_ids
             .first()
@@ -414,7 +364,6 @@ impl TextGenerationModel for Qwen3Model {
     }
 
     fn get_eos_tokens(&self) -> Vec<u32> {
-        // Return all EOS token IDs for robust termination detection
         self.generation_config
             .eos_token_ids
             .iter()
@@ -435,7 +384,6 @@ impl TextGenerationModel for Qwen3Model {
     }
 
     fn apply_chat_template(&self, messages: &[crate::Message]) -> Result<String> {
-        // Determine thinking mode
         let mut enable_thinking = self.reasoning;
         if let Some(last_user_msg) = messages
             .iter()
@@ -450,7 +398,6 @@ impl TextGenerationModel for Qwen3Model {
             }
         }
 
-        // Prepare messages (strip /think flags from user content)
         let messages_dicts: Vec<serde_json::Value> = messages
             .iter()
             .map(|msg| {
@@ -471,7 +418,6 @@ impl TextGenerationModel for Qwen3Model {
 
         let message_count = messages_dicts.len();
 
-        // Render the template using the pre-loaded environment
         let rendered = self
             .chat_template_env
             .get_template("chat")
@@ -530,7 +476,6 @@ use crate::pipelines::text_generation::model::Tool;
 
 impl ToolCalling for Qwen3Model {
     fn register_tool(&mut self, tool: Tool) -> Result<()> {
-        // Replace existing tool with same name if present
         if let Some(pos) = self.tools.iter().position(|t| t.name() == tool.name()) {
             self.tools[pos] = tool;
         } else {

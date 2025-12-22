@@ -10,7 +10,6 @@ pub trait SentimentAnalysisModel {
 
     fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String>;
 
-    /// Predict a batch of inputs, returning one result per item.
     fn predict_batch(&self, tokenizer: &Tokenizer, texts: &[&str]) -> Result<Vec<Result<String>>> {
         Ok(texts
             .iter()
@@ -18,9 +17,6 @@ pub trait SentimentAnalysisModel {
             .collect())
     }
 
-    /// Predict sentiment and return both label + confidence score.
-    ///
-    /// Default implementation falls back to `predict` and assigns a score of 1.0.
     fn predict_with_score(
         &self,
         tokenizer: &Tokenizer,
@@ -30,7 +26,6 @@ pub trait SentimentAnalysisModel {
         Ok(super::pipeline::SentimentResult { label, score: 1.0 })
     }
 
-    /// Predict a batch of inputs, returning both label and score for each entry.
     fn predict_with_score_batch(
         &self,
         tokenizer: &Tokenizer,
