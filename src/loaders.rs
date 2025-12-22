@@ -39,6 +39,7 @@
 use serde::Deserialize;
 use tokio::time::Duration;
 
+use crate::error::{DownloadError, ModelMetadataError, TokenizationError};
 use crate::{Result, TransformersError};
 
 /// Configuration loaded from HuggingFace generation_config.json
@@ -73,34 +74,45 @@ impl HfLoader {
         let hf_api = hf_hub::api::tokio::ApiBuilder::new()
             .with_chunk_size(None)
             .build()
-            .map_err(|e| TransformersError::Download(e.to_string()))?;
+            .map_err(|e| DownloadError::ApiInit {
+                reason: e.to_string(),
+            })?;
         let hf_repo = self.repo.clone();
         let hf_api = hf_api.model(hf_repo);
 
         // Retry logic for lock acquisition failures
         let max_retries = 3;
-        let mut last_error: Option<TransformersError> = None;
+        let mut attempts = 0u32;
 
         for attempt in 0..max_retries {
             match hf_api.get(self.filename.as_str()).await {
                 Ok(path) => return Ok(path),
                 Err(e) => {
                     let error_msg = e.to_string();
+                    attempts = attempt + 1;
                     if error_msg.contains("Lock acquisition failed") && attempt < max_retries - 1 {
                         // Wait before retrying, with exponential backoff
                         let wait_time = Duration::from_millis(100 * (1 << attempt));
                         tokio::time::sleep(wait_time).await;
-                        last_error = Some(TransformersError::Download(error_msg));
                         continue;
                     }
-                    return Err(TransformersError::Download(error_msg));
+                    return Err(DownloadError::Failed {
+                        repo: self.repo.clone(),
+                        file: self.filename.clone(),
+                        reason: error_msg,
+                    }
+                    .into());
                 }
             }
         }
 
-        // If we exhausted all retries, return the last encountered error or a generic one
-        Err(last_error
-            .unwrap_or_else(|| TransformersError::Download("unknown failure".to_string())))
+        // If we exhausted all retries, return timeout error
+        Err(DownloadError::Timeout {
+            repo: self.repo.clone(),
+            file: self.filename.clone(),
+            attempts,
+        }
+        .into())
     }
 }
 
@@ -120,9 +132,13 @@ impl TokenizerLoader {
 
     pub async fn load(&self) -> Result<Tokenizer> {
         let tokenizer_file_path = self.tokenizer_file_loader.load().await?;
+        let path_str = tokenizer_file_path.display().to_string();
 
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_file_path).map_err(|e| {
-            TransformersError::Tokenization(format!("Failed to load tokenizer: {e}"))
+        let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_file_path).map_err(|e| {
+            TokenizationError::LoadFailed {
+                path: path_str,
+                reason: e.to_string(),
+            }
         })?;
 
         Ok(tokenizer)
@@ -163,16 +179,23 @@ impl GenerationConfigLoader {
         let raw: RawGenerationConfig = serde_json::from_str(&generation_config_content)?;
 
         let eos_token_ids = match raw.eos_token_ids {
-            Some(serde_json::Value::Number(n)) => vec![n.as_u64().ok_or_else(|| {
-                TransformersError::ModelMetadata("Invalid EOS token ID".to_string())
-            })?],
+            Some(serde_json::Value::Number(n)) => {
+                vec![n.as_u64().ok_or_else(|| ModelMetadataError::InvalidValue {
+                    key: "eos_token_id".into(),
+                    expected: "unsigned integer".into(),
+                    actual: n.to_string(),
+                })?]
+            }
             Some(serde_json::Value::Array(arr)) => arr
                 .into_iter()
-                .map(|v| {
+                .enumerate()
+                .map(|(i, v)| {
                     v.as_u64().ok_or_else(|| {
-                        TransformersError::ModelMetadata(
-                            "Invalid EOS token ID in array".to_string(),
-                        )
+                        TransformersError::from(ModelMetadataError::InvalidValue {
+                            key: format!("eos_token_ids[{i}]"),
+                            expected: "unsigned integer".into(),
+                            actual: v.to_string(),
+                        })
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,

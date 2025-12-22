@@ -12,7 +12,8 @@ use std::io::{Read, Seek};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
-use crate::{Result, TransformersError};
+use crate::error::{ChatTemplateError, ModelMetadataError};
+use crate::Result;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Qwen3Size {
@@ -101,9 +102,9 @@ impl Qwen3Model {
         let config_json: serde_json::Value = serde_json::from_str(&tokenizer_config_content)?;
 
         let chat_template_str = config_json["chat_template"].as_str().ok_or_else(|| {
-            TransformersError::ChatTemplate(
-                "Missing 'chat_template' field in tokenizer config".to_string(),
-            )
+            ChatTemplateError::MissingTemplate {
+                model: "Qwen3".into(),
+            }
         })?;
 
         let mut chat_template_owned = chat_template_str.to_string();
@@ -134,29 +135,34 @@ impl Qwen3Model {
         // Leak the string to get 'static lifetime - this is fine since we're storing it in the model
         let chat_template_static = Box::leak(chat_template_owned.into_boxed_str());
         env.add_template("chat", chat_template_static)
-            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
+            .map_err(|e| ChatTemplateError::ParseFailed {
+                model: "Qwen3".into(),
+                reason: e.to_string(),
+            })?;
 
         Ok(Arc::new(env))
     }
     /// Load a Qwen3 model from a GGUF file.
     pub async fn from_gguf<R: Read + Seek>(reader: &mut R, device: &Device) -> Result<Self> {
         let content = gguf_file::Content::read(reader)?;
+        let available_keys: Vec<String> = content.metadata.keys().cloned().collect();
+
         let num_layers = content
             .metadata
             .get("qwen3.block_count")
-            .ok_or_else(|| {
-                TransformersError::ModelMetadata(
-                    "Missing metadata key: qwen3.block_count".to_string(),
-                )
+            .ok_or_else(|| ModelMetadataError::MissingKey {
+                key: "qwen3.block_count".into(),
+                model_type: "Qwen3".into(),
+                available: available_keys.clone(),
             })?
             .to_u32()? as usize;
         let max_seq_len = content
             .metadata
             .get("qwen3.context_length")
-            .ok_or_else(|| {
-                TransformersError::ModelMetadata(
-                    "Missing metadata key: qwen3.context_length".to_string(),
-                )
+            .ok_or_else(|| ModelMetadataError::MissingKey {
+                key: "qwen3.context_length".into(),
+                model_type: "Qwen3".into(),
+                available: available_keys.clone(),
             })?
             .to_u32()? as usize;
         let dtype = match content.metadata.get("general.dtype") {
@@ -210,22 +216,24 @@ impl Qwen3Model {
         .load()
         .await?;
 
+        let available_keys: Vec<String> = content.metadata.keys().cloned().collect();
+
         let num_layers = content
             .metadata
             .get("qwen3.block_count")
-            .ok_or_else(|| {
-                TransformersError::ModelMetadata(
-                    "Missing metadata key: qwen3.block_count".to_string(),
-                )
+            .ok_or_else(|| ModelMetadataError::MissingKey {
+                key: "qwen3.block_count".into(),
+                model_type: "Qwen3".into(),
+                available: available_keys.clone(),
             })?
             .to_u32()? as usize;
         let max_seq_len = content
             .metadata
             .get("qwen3.context_length")
-            .ok_or_else(|| {
-                TransformersError::ModelMetadata(
-                    "Missing metadata key: qwen3.context_length".to_string(),
-                )
+            .ok_or_else(|| ModelMetadataError::MissingKey {
+                key: "qwen3.context_length".into(),
+                model_type: "Qwen3".into(),
+                available: available_keys.clone(),
             })?
             .to_u32()? as usize;
         let dtype = match content.metadata.get("general.dtype") {
@@ -461,18 +469,27 @@ impl TextGenerationModel for Qwen3Model {
             })
             .collect();
 
+        let message_count = messages_dicts.len();
+
         // Render the template using the pre-loaded environment
         let rendered = self
             .chat_template_env
             .get_template("chat")
-            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?
+            .map_err(|e| ChatTemplateError::ParseFailed {
+                model: "Qwen3".into(),
+                reason: e.to_string(),
+            })?
             .render(context! {
                 messages => messages_dicts,
                 add_generation_prompt => true,
                 enable_thinking => enable_thinking,
                 tools => self.registered_tools(),
             })
-            .map_err(|e| TransformersError::ChatTemplate(e.to_string()))?;
+            .map_err(|e| ChatTemplateError::RenderFailed {
+                model: "Qwen3".into(),
+                message_count,
+                reason: e.to_string(),
+            })?;
 
         Ok(rendered)
     }

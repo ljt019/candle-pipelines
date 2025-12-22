@@ -1,10 +1,139 @@
+# Error Message Improvements
+
+## Summary
+Enhance error messages with actionable context. Users should understand what went wrong and how to fix it without reading source code.
+
+## Motivation
+Current errors are bare-bones:
+- `"Generation failed: {0}"` - what generation? what failed?
+- `"Model not found: {0}"` - where did we look? is it a typo?
+- `"Tokenization failed: {0}"` - what input caused it?
+
+Users end up in source code trying to understand failures.
+
+---
+
+## Error Inventory
+
+### Download Errors (4 sites)
+
+| Location | Current Code | Context Available |
+|----------|--------------|-------------------|
+| `src/loaders.rs:76` | `.map_err(\|e\| TransformersError::Download(e.to_string()))?` | `self.repo`, `self.filename` |
+| `src/loaders.rs:93` | `TransformersError::Download(error_msg)` | `self.repo`, `self.filename`, `attempt` count, `max_retries` |
+| `src/loaders.rs:96` | `TransformersError::Download(error_msg)` | `self.repo`, `self.filename`, underlying error |
+| `src/loaders.rs:103` | `TransformersError::Download("unknown failure")` | `self.repo`, `self.filename` |
+
+### ModelMetadata Errors (10 sites)
+
+| Location | Current Message | Context Available |
+|----------|-----------------|-------------------|
+| `src/loaders.rs:167` | `"Invalid EOS token ID"` | actual value received |
+| `src/loaders.rs:173` | `"Invalid EOS token ID in array"` | actual value, array index |
+| `src/models/gemma3.rs:98` | `"Missing critical metadata: gemma3.block_count"` | model path, available keys |
+| `src/models/gemma3.rs:169` | `"Gemma3 generation config is missing 'eos_token_ids'..."` | config file path |
+| `src/models/qwen3.rs:148` | `"Missing metadata key: qwen3.block_count"` | model path, available keys |
+| `src/models/qwen3.rs:157` | `"Missing metadata key: qwen3.context_length"` | model path, available keys |
+| `src/models/qwen3.rs:217` | `"Missing metadata key: qwen3.block_count"` | (duplicate site) |
+| `src/models/qwen3.rs:226` | `"Missing metadata key: qwen3.context_length"` | (duplicate site) |
+| `src/models/modernbert.rs:396` | `"Config missing 'entailment' in label2id"` | available labels |
+| `src/models/modernbert.rs:470` | `"Config missing 'entailment' in label2id"` | available labels |
+
+### ChatTemplate Errors (8 sites)
+
+| Location | Current Code | Context Available |
+|----------|--------------|-------------------|
+| `src/models/gemma3.rs:142` | `"Missing 'chat_template' field in tokenizer config"` | config file path, model name |
+| `src/models/gemma3.rs:154` | `e.to_string()` (minijinja error) | template name, model name |
+| `src/models/gemma3.rs:310` | `e.to_string()` (get_template) | model name |
+| `src/models/gemma3.rs:315` | `e.to_string()` (render) | model name, messages count |
+| `src/models/qwen3.rs:104` | `"Missing 'chat_template' field in tokenizer config"` | config file path, model name |
+| `src/models/qwen3.rs:137` | `e.to_string()` (add_template) | template name, model name |
+| `src/models/qwen3.rs:468` | `e.to_string()` (get_template) | model name |
+| `src/models/qwen3.rs:475` | `e.to_string()` (render) | model name, messages count, tools count |
+
+### Tokenization Errors (18 sites)
+
+| Location | Current Code | Context Available |
+|----------|--------------|-------------------|
+| `src/loaders.rs:125` | `"Failed to load tokenizer: {e}"` | `tokenizer_file_path` |
+| `src/models/modernbert.rs:70` | `"Tokenization error: {e}"` | input text (first N chars) |
+| `src/models/modernbert.rs:129` | `"Tokenization error: {e}"` | input text |
+| `src/models/modernbert.rs:404` | `"Tokenization error: {e}"` | text, hypothesis |
+| `src/models/modernbert.rs:712` | `"Tokenization error: {e}"` | input text |
+| `src/models/modernbert.rs:755` | `"Tokenization error: {e}"` | input text |
+| `src/models/modernbert.rs:913` | `"Failed to load tokenizer: {e}"` | tokenizer path |
+| `src/pipelines/text_generation/pipeline.rs:93` | `e.to_string()` | input text |
+| `src/pipelines/text_generation/pipeline.rs:176,203,266,278,439` | `e.to_string()` | templated prompt (first N chars) |
+| `src/pipelines/text_generation/xml_pipeline.rs:74,88,145,157,339,440` | `e.to_string()` | templated prompt |
+| `src/pipelines/text_generation/base_pipeline.rs:258,265,296,303` | `e.to_string()` | token being decoded |
+
+### Generation Errors (16 sites)
+
+| Location | Current Message | Context Available |
+|----------|-----------------|-------------------|
+| `src/pipelines/text_generation/base_pipeline.rs:127` | `"Model provided no EOS tokens; cannot run text generation"` | model name |
+| `src/pipelines/text_generation/base_pipeline.rs:224` | `"Model provided no EOS tokens; cannot stream..."` | model name |
+| `src/pipelines/fill_mask/pipeline.rs:23,34` | `"No predictions returned"` | input text |
+| `src/models/modernbert.rs:77,136` | `"No [MASK] token found in input"` | input text (first N chars) |
+| `src/models/modernbert.rs:234,272,517,559,821,862` | error msg or `"Unknown error"` | batch index |
+| `src/models/modernbert.rs:725,772,885` | `"Predicted ID '{pred_id}' not in id2label"` | pred_id, available labels |
+
+### ToolMessage Errors (8 sites)
+
+| Location | Current Message | Context Available |
+|----------|-----------------|-------------------|
+| `tool_macro/src/lib.rs:218` | `e.to_string()` | tool name (from macro context) |
+| `src/pipelines/text_generation/pipeline.rs:367` | `"Tool '{name}' not found"` | available tool names |
+| `src/pipelines/text_generation/pipeline.rs:415,509` | `"No tools registered..."` | - |
+| `src/pipelines/text_generation/xml_pipeline.rs:264` | `"Tool '{name}' not found"` | available tool names |
+| `src/pipelines/text_generation/xml_pipeline.rs:315,409` | `"No tools registered..."` | - |
+
+### ToolFormat Errors (5 sites)
+
+| Location | Current Message | Context Available |
+|----------|-----------------|-------------------|
+| `tool_macro/src/lib.rs:211,226` | `e.to_string()` (serde) | tool name, expected schema, received JSON |
+| `src/pipelines/text_generation/tools.rs:111` | `"schema serialization failed: {e}"` | tool name |
+| `src/pipelines/text_generation/tools.rs:116` | `"invalid schema: {e}"` | tool name, schema |
+| `src/pipelines/text_generation/tools.rs:128` | validation error messages | tool name, param name, expected type |
+
+### Device Errors (1 site)
+
+| Location | Current Code | Context Available |
+|----------|--------------|-------------------|
+| `src/pipelines/utils/mod.rs:36` | `e.to_string()` | `DeviceRequest` variant, device index |
+
+---
+
+## Design Decision: `#[non_exhaustive]` Enums
+
+We use simple enums with `#[non_exhaustive]` rather than opaque structs with `.kind()` methods.
+
+**Why not the `std::io::Error` pattern?**
+- The `.kind()` + accessor methods pattern is verbose and awkward to use
+- It exists for extreme semver stability in libraries with millions of users
+- For a 0.x library, it's overkill
+
+**Why `#[non_exhaustive]`?**
+- Users must include `_ =>` in match arms
+- We can add new variants in minor versions without breaking downstream code
+- We keep nice destructuring syntax: `DownloadError::Timeout { repo, .. } =>`
+
+---
+
+## New Error Definitions
+
+Replace the current `String` wrappers in `src/error.rs`:
+
+```rust
 use thiserror::Error;
 
 // ============================================================================
 // DOWNLOAD ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum DownloadError {
     #[error("Failed to download '{file}' from '{repo}': {reason}")]
@@ -29,7 +158,7 @@ pub enum DownloadError {
 // MODEL METADATA ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ModelMetadataError {
     #[error("Missing required metadata key '{key}' for {model_type} model. Available: {}", format_keys(.available))]
@@ -69,7 +198,7 @@ fn format_keys(keys: &[String]) -> String {
 // CHAT TEMPLATE ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ChatTemplateError {
     #[error("Missing 'chat_template' in tokenizer config for {model}")]
@@ -90,7 +219,7 @@ pub enum ChatTemplateError {
 // TOKENIZATION ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum TokenizationError {
     #[error("Failed to load tokenizer from '{path}': {reason}")]
@@ -98,7 +227,7 @@ pub enum TokenizationError {
 
     #[error("Tokenization failed on '{input_preview}': {reason}")]
     EncodeFailed {
-        input_preview: String, // first 50 chars
+        input_preview: String,  // first 50 chars
         reason: String,
     },
 
@@ -121,7 +250,7 @@ impl TokenizationError {
 // GENERATION ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum GenerationError {
     #[error("Reached max_len ({max_len} tokens) after generating {generated} tokens. Increase max_len or shorten prompt.")]
@@ -147,7 +276,7 @@ pub enum GenerationError {
 // TOOL ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ToolError {
     #[error("Tool '{name}' not found. Registered tools: {}", .available.join(", "))]
@@ -177,7 +306,7 @@ pub enum ToolError {
 // DEVICE ERRORS
 // ============================================================================
 
-#[derive(Error, Debug, Clone)]
+#[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum DeviceError {
     #[error("Failed to init CUDA device {index}: {reason}. Try DeviceRequest::Cpu as fallback.")]
@@ -212,15 +341,15 @@ pub enum TransformersError {
     #[error(transparent)]
     Device(#[from] DeviceError),
 
-    // Pass-through from dependencies - stored as strings to allow Clone on sub-errors
-    #[error("Candle error: {0}")]
-    Candle(String),
+    // Pass-through from dependencies
+    #[error(transparent)]
+    Candle(#[from] candle_core::Error),
 
-    #[error("IO error: {0}")]
-    Io(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 
-    #[error("JSON error: {0}")]
-    SerdeJson(String),
+    #[error(transparent)]
+    SerdeJson(#[from] serde_json::Error),
 
     // JSON mode (may expand later)
     #[error("JSON schema error: {0}")]
@@ -234,46 +363,116 @@ pub enum TransformersError {
 }
 
 pub type Result<T> = std::result::Result<T, TransformersError>;
+```
 
-impl From<candle_core::Error> for TransformersError {
-    fn from(value: candle_core::Error) -> Self {
-        TransformersError::Candle(value.to_string())
-    }
+---
+
+## User-Facing Example
+
+```rust
+use transformers::{TransformersError, DownloadError, ToolError};
+
+async fn run() -> transformers::Result<()> {
+    let pipeline = TextGenerationPipeline::builder()
+        .qwen3(Qwen3Size::Size0_6B)
+        .build()
+        .await?;
+
+    // ... use pipeline
+    Ok(())
 }
 
-impl From<std::io::Error> for TransformersError {
-    fn from(value: std::io::Error) -> Self {
-        TransformersError::Io(value.to_string())
-    }
-}
-
-impl From<serde_json::Error> for TransformersError {
-    fn from(value: serde_json::Error) -> Self {
-        TransformersError::SerdeJson(value.to_string())
-    }
-}
-
-impl From<hf_hub::api::sync::ApiError> for TransformersError {
-    fn from(value: hf_hub::api::sync::ApiError) -> Self {
-        DownloadError::Failed {
-            repo: "unknown".into(),
-            file: "unknown".into(),
-            reason: value.to_string(),
+fn main() {
+    if let Err(e) = run() {
+        match e {
+            TransformersError::Download(DownloadError::Timeout { repo, attempts, .. }) => {
+                eprintln!("Download timed out from {repo} after {attempts} tries");
+                std::process::exit(2);
+            }
+            TransformersError::Tool(ToolError::NotFound { name, available }) => {
+                eprintln!("Unknown tool '{name}'. Did you mean: {}?", available.join(", "));
+                std::process::exit(3);
+            }
+            _ => {
+                // Required because of #[non_exhaustive] - handles future variants gracefully
+                eprintln!("Error: {e}");
+                std::process::exit(1);
+            }
         }
-        .into()
     }
 }
+```
 
-impl From<regex::Error> for TransformersError {
-    fn from(value: regex::Error) -> Self {
-        GenerationError::BatchItemFailed {
-            index: 0,
-            reason: value.to_string(),
-        }
-        .into()
-    }
-}
+---
 
+## Migration Examples
+
+### Download Error
+
+**Before** (`src/loaders.rs:96`):
+```rust
+return Err(TransformersError::Download(error_msg));
+```
+
+**After**:
+```rust
+return Err(DownloadError::Failed {
+    repo: self.repo.clone(),
+    file: self.filename.clone(),
+    reason: error_msg,
+}.into());
+```
+
+### Tool Not Found
+
+**Before** (`src/pipelines/text_generation/pipeline.rs:367`):
+```rust
+TransformersError::ToolMessage(format!("Tool '{}' not found", call.name))
+```
+
+**After**:
+```rust
+ToolError::NotFound {
+    name: call.name.clone(),
+    available: tools.iter().map(|t| t.name.clone()).collect(),
+}.into()
+```
+
+### Tokenization Error
+
+**Before** (`src/models/modernbert.rs:70`):
+```rust
+.map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?
+```
+
+**After**:
+```rust
+.map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?
+```
+
+### Model Metadata Error
+
+**Before** (`src/models/qwen3.rs:148`):
+```rust
+TransformersError::ModelMetadata("Missing metadata key: qwen3.block_count".to_string())
+```
+
+**After**:
+```rust
+ModelMetadataError::MissingKey {
+    key: "qwen3.block_count".into(),
+    model_type: "Qwen3".into(),
+    available: gguf.metadata.keys().cloned().collect(),
+}.into()
+```
+
+---
+
+## Test Cases
+
+Add to `src/error.rs`:
+
+```rust
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -455,8 +654,7 @@ mod tests {
             repo: "org/model".into(),
             file: "weights.gguf".into(),
             reason: "404".into(),
-        }
-        .into();
+        }.into();
 
         assert!(matches!(err, TransformersError::Download(_)));
         assert!(err.to_string().contains("org/model"));
@@ -484,9 +682,45 @@ mod tests {
         let msg = match err {
             DownloadError::Failed { reason, .. } => reason,
             DownloadError::Timeout { .. } => "timeout".into(),
-            _ => "other".into(), // Required!
+            _ => "other".into(),  // Required!
         };
 
         assert_eq!(msg, "z");
     }
 }
+```
+
+---
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `src/error.rs` | Replace current enum with new `#[non_exhaustive]` error enums |
+| `src/loaders.rs` | 5 sites → `DownloadError`, `TokenizationError` |
+| `src/models/qwen3.rs` | 8 sites → `ModelMetadataError`, `ChatTemplateError` |
+| `src/models/gemma3.rs` | 6 sites → `ModelMetadataError`, `ChatTemplateError` |
+| `src/models/modernbert.rs` | 15 sites → `TokenizationError`, `GenerationError`, `ModelMetadataError` |
+| `src/pipelines/text_generation/pipeline.rs` | 10 sites → `TokenizationError`, `ToolError` |
+| `src/pipelines/text_generation/xml_pipeline.rs` | 10 sites → `TokenizationError`, `ToolError` |
+| `src/pipelines/text_generation/base_pipeline.rs` | 6 sites → `TokenizationError`, `GenerationError` |
+| `src/pipelines/text_generation/tools.rs` | 3 sites → `ToolError` |
+| `src/pipelines/utils/mod.rs` | 1 site → `DeviceError` |
+| `tool_macro/src/lib.rs` | 3 sites → `ToolError` |
+
+---
+
+## Backward Compatibility
+
+- `TransformersError` still implements `std::error::Error`, `Debug`, `Display`
+- `Result<T>` type alias unchanged
+- `?` propagation works via `#[from]` attributes
+- Existing `impl From<X> for TransformersError` preserved for dependency errors
+
+## Breaking Changes
+
+- `TransformersError::Download(String)` → `TransformersError::Download(DownloadError)`
+- `TransformersError::ToolMessage(String)` → `TransformersError::Tool(ToolError)`
+- etc. for all error types
+- Error message strings will change (this is the point!)
+- Users matching on errors must now use `_ =>` arm (due to `#[non_exhaustive]`)

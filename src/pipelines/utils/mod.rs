@@ -1,5 +1,6 @@
 use super::cache::ModelOptions;
-use crate::{Result, TransformersError};
+use crate::error::DeviceError;
+use crate::Result;
 use candle_core::{CudaDevice, Device};
 
 pub mod builder;
@@ -31,9 +32,17 @@ impl DeviceRequest {
                 }
             }
             DeviceRequest::Cpu => Ok(Device::Cpu),
-            DeviceRequest::Cuda(i) => CudaDevice::new_with_stream(i)
-                .map(Device::Cuda)
-                .map_err(|e| TransformersError::Device(e.to_string())),
+            DeviceRequest::Cuda(i) => {
+                CudaDevice::new_with_stream(i)
+                    .map(Device::Cuda)
+                    .map_err(|e| {
+                        DeviceError::CudaInitFailed {
+                            index: i,
+                            reason: e.to_string(),
+                        }
+                        .into()
+                    })
+            }
             DeviceRequest::Explicit(d) => Ok(d),
         }
     }

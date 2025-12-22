@@ -5,7 +5,7 @@
 
 use transformers::pipelines::text_generation::*;
 use transformers::pipelines::utils::DeviceSelectable;
-use transformers::{Result, TransformersError};
+use transformers::{Result, ToolError};
 
 #[tool]
 fn get_weather(city: String) -> Result<String> {
@@ -60,7 +60,12 @@ async fn tool_registration() -> transformers::Result<()> {
 
 #[tool(on_error = ErrorStrategy::Fail, retries = 1)]
 fn fail_tool() -> Result<String> {
-    Err(TransformersError::ToolMessage("boom".into()))
+    Err(ToolError::ExecutionFailed {
+        name: "fail_tool".into(),
+        attempts: 1,
+        reason: "boom".into(),
+    }
+    .into())
 }
 
 #[tokio::test]

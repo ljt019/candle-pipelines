@@ -208,14 +208,25 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             Box::pin(async move {
                 let parsed: #params_struct_name = serde_json::from_value(parameters)
-                    .map_err(|e| transformers::TransformersError::ToolFormat(e.to_string()))?;
+                    .map_err(|e| transformers::TransformersError::Tool(
+                        transformers::error::ToolError::InvalidParams {
+                            name: #fn_name_str.to_string(),
+                            reason: e.to_string(),
+                        }
+                    ))?;
                 let #params_struct_name { #( #param_idents ),* } = parsed;
                 let result = #call_invocation;
 
                 // Convert the result to the expected type
                 match result {
                     Ok(s) => Ok(s),
-                    Err(e) => Err(transformers::TransformersError::ToolMessage(e.to_string())),
+                    Err(e) => Err(transformers::TransformersError::Tool(
+                        transformers::error::ToolError::ExecutionFailed {
+                            name: #fn_name_str.to_string(),
+                            attempts: 1,
+                            reason: e.to_string(),
+                        }
+                    )),
                 }
             })
         }
@@ -223,7 +234,12 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             Box::pin(async move {
                 let parsed: #params_struct_name = serde_json::from_value(parameters)
-                    .map_err(|e| transformers::TransformersError::ToolFormat(e.to_string()))?;
+                    .map_err(|e| transformers::TransformersError::Tool(
+                        transformers::error::ToolError::InvalidParams {
+                            name: #fn_name_str.to_string(),
+                            reason: e.to_string(),
+                        }
+                    ))?;
                 let #params_struct_name { #( #param_idents ),* } = parsed;
                 let result = #call_invocation;
                 Ok(result)

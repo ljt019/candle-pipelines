@@ -13,6 +13,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tokenizers::Tokenizer;
 
+use crate::error::{GenerationError, ModelMetadataError, TokenizationError};
 use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
 use crate::{Result, TransformersError};
@@ -67,14 +68,17 @@ impl FillMaskModernBertModel {
     pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         let encoding = tokenizer
             .encode(text, true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?;
         let mask_id = tokenizer.token_to_id("[MASK]").unwrap_or(103);
         let mask_index = encoding
             .get_ids()
             .iter()
             .position(|&id| id == mask_id)
             .ok_or_else(|| {
-                TransformersError::Generation("No [MASK] token found in input".to_string())
+                let preview: String = text.chars().take(50).collect();
+                GenerationError::NoMaskToken {
+                    input_preview: preview,
+                }
             })?;
 
         let input_ids = Tensor::new(encoding.get_ids(), &self.device)?.unsqueeze(0)?;
@@ -126,14 +130,17 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
 
         let encoding = tokenizer
             .encode(text, true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?;
         let mask_id = tokenizer.token_to_id("[MASK]").unwrap_or(103);
         let mask_index = encoding
             .get_ids()
             .iter()
             .position(|&id| id == mask_id)
             .ok_or_else(|| {
-                TransformersError::Generation("No [MASK] token found in input".to_string())
+                let preview: String = text.chars().take(50).collect();
+                GenerationError::NoMaskToken {
+                    input_preview: preview,
+                }
             })?;
 
         let input_ids = Tensor::new(encoding.get_ids(), &self.device)?.unsqueeze(0)?;
@@ -194,7 +201,8 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         // Tokenize all inputs and find mask positions
         let mut encodings = Vec::with_capacity(texts.len());
         let mut mask_indices = Vec::with_capacity(texts.len());
-        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+        let mut error_results: Vec<Option<TransformersError>> =
+            (0..texts.len()).map(|_| None).collect();
 
         for (i, text) in texts.iter().enumerate() {
             match tokenizer.encode(*text, true) {
@@ -206,14 +214,21 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
                             encodings.push(Some(encoding));
                         }
                         None => {
-                            error_messages[i] = Some("No [MASK] token found in input".to_string());
+                            let preview: String = text.chars().take(50).collect();
+                            error_results[i] = Some(
+                                GenerationError::NoMaskToken {
+                                    input_preview: preview,
+                                }
+                                .into(),
+                            );
                             mask_indices.push(0);
                             encodings.push(None);
                         }
                     }
                 }
                 Err(e) => {
-                    error_messages[i] = Some(format!("Tokenization error: {e}"));
+                    error_results[i] =
+                        Some(TokenizationError::encode_failed(*text, e.to_string()).into());
                     mask_indices.push(0);
                     encodings.push(None);
                 }
@@ -228,13 +243,9 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
             .collect();
 
         if valid_indices.is_empty() {
-            return Ok(error_messages
+            return Ok(error_results
                 .into_iter()
-                .map(|e| {
-                    Err(TransformersError::Generation(
-                        e.unwrap_or_else(|| "Unknown error".to_string()),
-                    ))
-                })
+                .map(|e| Err(e.unwrap_or_else(|| GenerationError::NoPredictions.into())))
                 .collect());
         }
 
@@ -266,10 +277,10 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
         let logits = self.model.forward(&input_ids, &attention_mask)?;
 
         // Extract predictions for each item
-        let mut results: Vec<Result<Vec<FillMaskPrediction>>> = error_messages
+        let mut results: Vec<Result<Vec<FillMaskPrediction>>> = error_results
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(TransformersError::Generation(msg)),
+                Some(err) => Err(err),
                 None => Ok(vec![]), // Placeholder, will be filled
             })
             .collect();
@@ -392,16 +403,22 @@ impl ZeroShotModernBertModel {
             return Ok(vec![]);
         }
 
-        let entailment_id = *self.label2id.get("entailment").ok_or_else(|| {
-            TransformersError::ModelMetadata("Config missing 'entailment' in label2id".to_string())
-        })?;
+        let available_labels: Vec<String> = self.label2id.keys().cloned().collect();
+        let entailment_id =
+            *self
+                .label2id
+                .get("entailment")
+                .ok_or_else(|| ModelMetadataError::MissingLabel {
+                    label: "entailment".into(),
+                    available: available_labels,
+                })?;
 
         let mut encodings = Vec::new();
         for &label in candidate_labels {
             let hypothesis = format!("This example is {label}.");
             let encoding = tokenizer
                 .encode((text, hypothesis.as_str()), true)
-                .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
+                .map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?;
             encodings.push(encoding);
         }
 
@@ -466,9 +483,15 @@ impl ZeroShotModernBertModel {
             return Ok(texts.iter().map(|_| Ok(vec![])).collect());
         }
 
-        let entailment_id = *self.label2id.get("entailment").ok_or_else(|| {
-            TransformersError::ModelMetadata("Config missing 'entailment' in label2id".to_string())
-        })?;
+        let available_labels: Vec<String> = self.label2id.keys().cloned().collect();
+        let entailment_id =
+            *self
+                .label2id
+                .get("entailment")
+                .ok_or_else(|| ModelMetadataError::MissingLabel {
+                    label: "entailment".into(),
+                    available: available_labels,
+                })?;
 
         let pad_token_id = tokenizer
             .get_padding()
@@ -482,7 +505,8 @@ impl ZeroShotModernBertModel {
         // Tokenize all (text, label) pairs
         // Layout: [text0_label0, text0_label1, ..., text1_label0, text1_label1, ...]
         let mut all_encodings = Vec::with_capacity(texts.len() * num_labels);
-        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+        let mut error_results: Vec<Option<TransformersError>> =
+            (0..texts.len()).map(|_| None).collect();
 
         for (text_idx, text) in texts.iter().enumerate() {
             let mut text_has_error = false;
@@ -495,7 +519,8 @@ impl ZeroShotModernBertModel {
                 match tokenizer.encode((*text, hypothesis.as_str()), true) {
                     Ok(encoding) => all_encodings.push(Some(encoding)),
                     Err(e) => {
-                        error_messages[text_idx] = Some(format!("Tokenization error: {e}"));
+                        error_results[text_idx] =
+                            Some(TokenizationError::encode_failed(*text, e.to_string()).into());
                         text_has_error = true;
                         all_encodings.push(None);
                     }
@@ -511,13 +536,9 @@ impl ZeroShotModernBertModel {
             .collect();
 
         if valid_pair_indices.is_empty() {
-            return Ok(error_messages
+            return Ok(error_results
                 .into_iter()
-                .map(|e| {
-                    Err(TransformersError::Generation(
-                        e.unwrap_or_else(|| "Unknown error".to_string()),
-                    ))
-                })
+                .map(|e| Err(e.unwrap_or_else(|| GenerationError::NoPredictions.into())))
                 .collect());
         }
 
@@ -553,10 +574,10 @@ impl ZeroShotModernBertModel {
             .to_vec1::<f32>()?;
 
         // Map results back to original structure
-        let mut results: Vec<Result<Vec<(String, f32)>>> = error_messages
+        let mut results: Vec<Result<Vec<(String, f32)>>> = error_results
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(TransformersError::Generation(msg)),
+                Some(err) => Err(err),
                 None => Ok(vec![]), // Placeholder
             })
             .collect();
@@ -709,7 +730,7 @@ impl SentimentModernBertModel {
     pub fn predict(&self, tokenizer: &Tokenizer, text: &str) -> Result<String> {
         let tokens = tokenizer
             .encode(text, true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?;
 
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -718,11 +739,13 @@ impl SentimentModernBertModel {
         let logits = self.model.forward(&input_ids, &attention_mask)?;
         let pred_id = logits.argmax(D::Minus1)?.squeeze(0)?.to_scalar::<u32>()?;
 
+        let available_labels: Vec<String> = self.id2label.keys().cloned().collect();
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| {
-                TransformersError::Generation(format!("Predicted ID '{pred_id}' not in id2label"))
+            .ok_or_else(|| GenerationError::UnknownLabelId {
+                id: pred_id as i64,
+                available: available_labels,
             })?
             .clone();
 
@@ -752,7 +775,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
     fn predict_with_score(&self, tokenizer: &Tokenizer, text: &str) -> Result<SentimentResult> {
         let tokens = tokenizer
             .encode(text, true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization error: {e}")))?;
+            .map_err(|e| TokenizationError::encode_failed(text, e.to_string()))?;
 
         let input_ids = Tensor::new(tokens.get_ids(), &self.device)?.unsqueeze(0)?;
         let attention_mask =
@@ -765,11 +788,13 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let probs_vec = probs.squeeze(0)?.to_vec1::<f32>()?;
         let score = probs_vec.get(pred_id as usize).copied().unwrap_or(0.0);
 
+        let available_labels: Vec<String> = self.id2label.keys().cloned().collect();
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| {
-                TransformersError::Generation(format!("Predicted ID '{pred_id}' not in id2label"))
+            .ok_or_else(|| GenerationError::UnknownLabelId {
+                id: pred_id as i64,
+                available: available_labels,
             })?
             .clone();
 
@@ -795,13 +820,15 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
 
         // Tokenize all inputs
         let mut encodings = Vec::with_capacity(texts.len());
-        let mut error_messages: Vec<Option<String>> = vec![None; texts.len()];
+        let mut error_results: Vec<Option<TransformersError>> =
+            (0..texts.len()).map(|_| None).collect();
 
         for (i, text) in texts.iter().enumerate() {
             match tokenizer.encode(*text, true) {
                 Ok(encoding) => encodings.push(Some(encoding)),
                 Err(e) => {
-                    error_messages[i] = Some(format!("Tokenization error: {e}"));
+                    error_results[i] =
+                        Some(TokenizationError::encode_failed(*text, e.to_string()).into());
                     encodings.push(None);
                 }
             }
@@ -815,13 +842,9 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
             .collect();
 
         if valid_indices.is_empty() {
-            return Ok(error_messages
+            return Ok(error_results
                 .into_iter()
-                .map(|e| {
-                    Err(TransformersError::Generation(
-                        e.unwrap_or_else(|| "Unknown error".to_string()),
-                    ))
-                })
+                .map(|e| Err(e.unwrap_or_else(|| GenerationError::NoPredictions.into())))
                 .collect());
         }
 
@@ -856,10 +879,10 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let probs_2d = probs.to_vec2::<f32>()?;
 
         // Extract predictions for each item
-        let mut results: Vec<Result<SentimentResult>> = error_messages
+        let mut results: Vec<Result<SentimentResult>> = error_results
             .into_iter()
             .map(|e| match e {
-                Some(msg) => Err(TransformersError::Generation(msg)),
+                Some(err) => Err(err),
                 None => Ok(SentimentResult {
                     label: String::new(),
                     score: 0.0,
@@ -874,6 +897,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                 .copied()
                 .unwrap_or(0.0);
 
+            let available_labels: Vec<String> = self.id2label.keys().cloned().collect();
             match self.id2label.get(&pred_id.to_string()) {
                 Some(label) => {
                     results[orig_idx] = Ok(SentimentResult {
@@ -882,9 +906,11 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                     });
                 }
                 None => {
-                    results[orig_idx] = Err(TransformersError::Generation(format!(
-                        "Predicted ID '{pred_id}' not in id2label",
-                    )));
+                    results[orig_idx] = Err(GenerationError::UnknownLabelId {
+                        id: pred_id as i64,
+                        available: available_labels,
+                    }
+                    .into());
                 }
             }
         }
@@ -909,8 +935,14 @@ fn load_tokenizer(repo_id: &str) -> Result<Tokenizer> {
     let api = Api::new()?;
     let repo = api.repo(Repo::new(repo_id.to_string(), RepoType::Model));
     let tokenizer_path = repo.get("tokenizer.json")?;
-    Tokenizer::from_file(tokenizer_path)
-        .map_err(|e| TransformersError::Tokenization(format!("Failed to load tokenizer: {e}")))
+    let path_str = tokenizer_path.display().to_string();
+    Tokenizer::from_file(&tokenizer_path).map_err(|e| {
+        TokenizationError::LoadFailed {
+            path: path_str,
+            reason: e.to_string(),
+        }
+        .into()
+    })
 }
 
 fn load_model_weights(repo_id: &str, device: &Device) -> Result<(Config, VarBuilder<'static>)> {

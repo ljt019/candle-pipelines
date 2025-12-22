@@ -1,7 +1,8 @@
 use super::model::{LanguageModelContext, TextGenerationModel};
 use super::params::{apply_repeat_penalty, initialize_logits_processor, GenerationParams};
 use super::stats::GenerationStats;
-use crate::{Result, TransformersError};
+use crate::error::{GenerationError, TokenizationError};
+use crate::Result;
 use candle_core::Tensor;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -124,9 +125,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         // Generate autoregressively
         let eos_tokens = self.model.lock().await.get_eos_tokens();
         if eos_tokens.is_empty() {
-            return Err(TransformersError::Generation(
-                "Model provided no EOS tokens; cannot run text generation".to_string(),
-            ));
+            return Err(GenerationError::NoEosTokens.into());
         }
         for _ in 0..params.max_len {
             if eos_tokens.contains(&next_token) {
@@ -221,9 +220,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             let params = gen_params.lock().await.clone();
             let eos_tokens = model.lock().await.get_eos_tokens();
             if eos_tokens.is_empty() {
-                Err(TransformersError::Generation(
-                    "Model provided no EOS tokens; cannot stream text generation".to_string(),
-                ))?;
+                Err(GenerationError::NoEosTokens)?;
             }
             const CHUNK_SIZE: usize = 64;
 
@@ -255,14 +252,14 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
             if !eos_tokens.contains(&next_token) {
                 if let Some(chunk) =
-                    dec_full.step(next_token).map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                    dec_full.step(next_token).map_err(|e| TokenizationError::DecodeFailed { token_id: next_token, reason: e.to_string() })?
                 {
                     yield chunk;
                 }
             } else {
                 let _ = dec_full
                     .step(next_token)
-                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?;
+                    .map_err(|e| TokenizationError::DecodeFailed { token_id: next_token, reason: e.to_string() })?;
             }
 
             for _ in 0..params.max_len {
@@ -293,14 +290,14 @@ impl<M: TextGenerationModel> BasePipeline<M> {
                 if !eos_tokens.contains(&next_token) {
                     if let Some(chunk) = dec_full
                         .step(next_token)
-                        .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                        .map_err(|e| TokenizationError::DecodeFailed { token_id: next_token, reason: e.to_string() })?
                     {
                         yield chunk;
                     }
                 } else {
                     let _ = dec_full
                         .step(next_token)
-                        .map_err(|e| TransformersError::Tokenization(e.to_string()))?;
+                        .map_err(|e| TokenizationError::DecodeFailed { token_id: next_token, reason: e.to_string() })?;
                 }
             }
 

@@ -1,4 +1,5 @@
-use crate::{Result, TransformersError};
+use crate::error::ToolError;
+use crate::Result;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
@@ -107,13 +108,17 @@ impl Tool {
 
     /// Validate a parameters value against the tool schema.
     pub fn validate(&self, params: &serde_json::Value) -> Result<()> {
-        let schema = serde_json::to_value(&self.schema).map_err(|e| {
-            TransformersError::ToolFormat(format!("schema serialization failed: {e}"))
+        let schema = serde_json::to_value(&self.schema).map_err(|e| ToolError::SchemaError {
+            name: self.name.clone(),
+            reason: format!("schema serialization failed: {e}"),
         })?;
         let compiled = jsonschema::JSONSchema::options()
             .with_draft(jsonschema::Draft::Draft7)
             .compile(&schema)
-            .map_err(|e| TransformersError::ToolFormat(format!("invalid schema: {e}")))?;
+            .map_err(|e| ToolError::SchemaError {
+                name: self.name.clone(),
+                reason: format!("invalid schema: {e}"),
+            })?;
 
         let validation_result = compiled.validate(params).map_err(|errors| {
             errors
@@ -125,7 +130,11 @@ impl Tool {
             Ok(_) => Ok(()),
             Err(messages) => {
                 let error_msg = messages.join(", ");
-                Err(TransformersError::ToolFormat(error_msg))
+                Err(ToolError::InvalidParams {
+                    name: self.name.clone(),
+                    reason: error_msg,
+                }
+                .into())
             }
         }
     }

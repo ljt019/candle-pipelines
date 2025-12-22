@@ -5,7 +5,8 @@ use super::params::GenerationParams;
 use super::parser::{Event, XmlParser};
 use super::pipeline::Input;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
-use crate::{Result, TransformersError};
+use crate::error::{TokenizationError, ToolError};
+use crate::Result;
 use async_stream::stream;
 use futures::Stream;
 use futures::StreamExt;
@@ -70,8 +71,8 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         let prompt_tokens = self
             .base
             .model_tokenizer
-            .encode(templated_prompt, true)
-            .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+            .encode(templated_prompt.as_str(), true)
+            .map_err(|e| TokenizationError::encode_failed(&templated_prompt, e.to_string()))?
             .get_ids()
             .to_vec();
 
@@ -84,8 +85,8 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         let new_tokens = self
             .base
             .model_tokenizer
-            .encode(templated_prompt, true)
-            .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+            .encode(templated_prompt.as_str(), true)
+            .map_err(|e| TokenizationError::encode_failed(&templated_prompt, e.to_string()))?
             .get_ids()
             .to_vec();
 
@@ -141,8 +142,8 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
                 let tokens = self
                     .base
                     .model_tokenizer
-                    .encode(templated, true)
-                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                    .encode(templated.as_str(), true)
+                    .map_err(|e| TokenizationError::encode_failed(&templated, e.to_string()))?
                     .get_ids()
                     .to_vec();
 
@@ -153,8 +154,8 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
                 let new_tokens = self
                     .base
                     .model_tokenizer
-                    .encode(templated, true)
-                    .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                    .encode(templated.as_str(), true)
+                    .map_err(|e| TokenizationError::encode_failed(&templated, e.to_string()))?
                     .get_ids()
                     .to_vec();
 
@@ -260,9 +261,15 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
 
         for call in tool_calls {
             // Find the tool
-            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
-                TransformersError::ToolMessage(format!("Tool '{}' not found", call.name))
-            })?;
+            let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+            let tool =
+                tools
+                    .iter()
+                    .find(|t| t.name == call.name)
+                    .ok_or_else(|| ToolError::NotFound {
+                        name: call.name.clone(),
+                        available: available_tools,
+                    })?;
 
             // Execute the tool with retries
             let args = call.arguments.clone();
@@ -283,7 +290,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                         attempts += 1;
                         if attempts >= tool.max_retries() {
                             match tool.error_strategy() {
-                                ErrorStrategy::Fail => return Err(e.into()),
+                                ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
                                     // Also ensure error messages end with exactly one newline
                                     let error_msg = format!("Error: {e}");
@@ -312,9 +319,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
     ) -> Result<Vec<Event>> {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::ToolMessage(
-                "No tools registered. Call register_tools() first.".to_string(),
-            ));
+            return Err(ToolError::NoToolsRegistered.into());
         }
 
         let mut messages = match input.into() {
@@ -335,8 +340,8 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
             let new_tokens = self
                 .base
                 .model_tokenizer
-                .encode(templated, true)
-                .map_err(|e| TransformersError::Tokenization(e.to_string()))?
+                .encode(templated.as_str(), true)
+                .map_err(|e| TokenizationError::encode_failed(&templated, e.to_string()))?
                 .get_ids()
                 .to_vec();
 
@@ -406,9 +411,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
     > {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::ToolMessage(
-                "No tools registered. Call register_tools() first.".to_string(),
-            ));
+            return Err(ToolError::NoToolsRegistered.into());
         }
 
         let initial_messages = match input.into() {
@@ -436,8 +439,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                     let new_tokens = self
                         .base
                         .model_tokenizer
-                        .encode(templated, true)
-                        .map_err(|e| TransformersError::Tokenization(e.to_string()))
+                        .encode(templated.as_str(), true)
                         .expect("failed to encode")
                         .get_ids()
                         .to_vec();
