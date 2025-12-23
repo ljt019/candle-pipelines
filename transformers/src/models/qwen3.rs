@@ -8,8 +8,8 @@ use std::io::{Read, Seek};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
+use crate::error::Result;
 use crate::error::{ChatTemplateError, ModelMetadataError};
-use crate::Result;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Qwen3Size {
@@ -80,7 +80,7 @@ pub struct Qwen3Model {
     info: ModelInfo,
     reasoning: bool,
     generation_config: crate::loaders::GenerationConfig,
-    tools: Vec<crate::pipelines::text_generation::Tool>,
+    tools: Vec<crate::pipelines::text_generation::tools::Tool>,
     chat_template_env: Arc<Environment<'static>>,
 }
 
@@ -330,8 +330,9 @@ pub struct ModelInfo {
 }
 
 use crate::pipelines::text_generation::model::{
-    LanguageModelContext, TextGenerationModel, ToggleableReasoning, ToolCalling,
+    LanguageModelContext, TextGenerationModel, ToggleableReasoning,
 };
+use crate::pipelines::text_generation::tools::ToolCalling;
 
 impl LanguageModelContext for Context {
     fn generate(&mut self, input: &Tensor) -> candle_core::Result<Tensor> {
@@ -344,10 +345,6 @@ impl LanguageModelContext for Context {
 
     fn position(&self) -> usize {
         self.position
-    }
-
-    fn can_continue_from(&self, position: usize) -> bool {
-        self.position == position
     }
 }
 
@@ -383,12 +380,15 @@ impl TextGenerationModel for Qwen3Model {
         Qwen3Model::get_tokenizer(self).await
     }
 
-    fn apply_chat_template(&self, messages: &[crate::Message]) -> Result<String> {
+    fn apply_chat_template(
+        &self,
+        messages: &[crate::pipelines::text_generation::message::Message],
+    ) -> Result<String> {
         let mut enable_thinking = self.reasoning;
         if let Some(last_user_msg) = messages
             .iter()
             .rev()
-            .find(|msg| msg.role() == &crate::message::Role::User)
+            .find(|msg| msg.role() == &crate::text_generation::message::Role::User)
         {
             let content = last_user_msg.content();
             if content.contains("/think") {
@@ -402,7 +402,7 @@ impl TextGenerationModel for Qwen3Model {
             .iter()
             .map(|msg| {
                 let mut content = msg.content().to_string();
-                if msg.role() == &crate::message::Role::User {
+                if msg.role() == &crate::pipelines::text_generation::message::Role::User {
                     content = content
                         .replace("/think", "")
                         .replace("/no_think", "")
@@ -472,7 +472,7 @@ impl ToggleableReasoning for Qwen3Model {
     }
 }
 
-use crate::pipelines::text_generation::model::Tool;
+use crate::pipelines::text_generation::tools::Tool;
 
 impl ToolCalling for Qwen3Model {
     fn register_tool(&mut self, tool: Tool) -> Result<()> {

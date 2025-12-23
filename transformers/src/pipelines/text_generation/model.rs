@@ -1,8 +1,7 @@
-use crate::Message;
-use crate::Result;
+use crate::error::Result;
 use candle_core::{Device, Tensor};
 
-pub use super::tools::{ErrorStrategy, IntoTool, Tool, ToolCalling, ToolFuture};
+use super::message::Message;
 
 pub trait LanguageModelContext: Send {
     fn generate(&mut self, input: &Tensor) -> candle_core::Result<Tensor>;
@@ -10,8 +9,6 @@ pub trait LanguageModelContext: Send {
     fn reset(&mut self);
 
     fn position(&self) -> usize;
-
-    fn can_continue_from(&self, position: usize) -> bool;
 }
 
 #[allow(async_fn_in_trait)]
@@ -46,6 +43,7 @@ pub trait TextGenerationModel {
     }
 }
 
+#[allow(dead_code)]
 pub trait Reasoning {}
 
 pub trait ToggleableReasoning {

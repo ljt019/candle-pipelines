@@ -1,18 +1,22 @@
 use super::params::GenerationParams;
+use super::tools::ErrorStrategy;
+use crate::error::Result;
 use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
 use crate::pipelines::cache::{global_cache, ModelOptions};
-use crate::pipelines::utils::{build_cache_key, DeviceRequest, DeviceSelectable};
-use crate::Result;
+use crate::pipelines::utils::{build_cache_key, DeviceRequest};
 
 use super::model::TextGenerationModel;
 use super::parser::XmlParserBuilder;
 use super::pipeline::TextGenerationPipeline;
 use super::xml_pipeline::XmlGenerationPipeline;
 
+crate::pipelines::utils::impl_device_methods!(direct: TextGenerationPipelineBuilder<M: TextGenerationModel>);
+
 pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
     model_options: M::Options,
     gen_params: GenerationParams,
     device_request: DeviceRequest,
+    tool_error_strategy: ErrorStrategy,
 }
 
 impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
@@ -21,7 +25,13 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             model_options: options,
             gen_params: GenerationParams::default(),
             device_request: DeviceRequest::Cpu,
+            tool_error_strategy: ErrorStrategy::default(),
         }
+    }
+
+    pub fn tool_error_strategy(mut self, strategy: ErrorStrategy) -> Self {
+        self.tool_error_strategy = strategy;
+        self
     }
 
     pub fn temperature(mut self, temperature: f64) -> Self {
@@ -89,7 +99,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             })
             .await?;
 
-        TextGenerationPipeline::new(model, self.gen_params, device).await
+        TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy).await
     }
 
     pub async fn build_xml(self, tags: &[&str]) -> Result<XmlGenerationPipeline<M>>
@@ -113,13 +123,14 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             builder.register_tag(*tag);
         }
         let xml_parser = builder.build();
-        XmlGenerationPipeline::new(model, self.gen_params, xml_parser, device).await
-    }
-}
-
-impl<M: TextGenerationModel> DeviceSelectable for TextGenerationPipelineBuilder<M> {
-    fn device_request_mut(&mut self) -> &mut DeviceRequest {
-        &mut self.device_request
+        XmlGenerationPipeline::new(
+            model,
+            self.gen_params,
+            xml_parser,
+            device,
+            self.tool_error_strategy,
+        )
+        .await
     }
 }
 

@@ -1,44 +1,26 @@
-pub mod base_pipeline;
-pub mod builder;
-pub mod model;
-pub mod params;
-pub mod parser;
-pub mod pipeline;
-pub mod stats;
-pub mod streaming;
-pub mod tools;
-pub mod xml_pipeline;
+// ============ Internal API ============
+
+pub(crate) mod base_pipeline;
+pub(crate) mod builder;
+pub(crate) mod message;
+pub(crate) mod model;
+pub(crate) mod params;
+pub(crate) mod parser;
+pub(crate) mod pipeline;
+pub(crate) mod stats;
+pub(crate) mod streaming;
+pub(crate) mod tools;
+pub(crate) mod xml_pipeline;
+
+#[doc(hidden)]
+pub use tools::ToolFuture; // For tool_macro
+
+// ============ Public API ============
 
 pub use crate::models::{Gemma3Size, Qwen3Size};
-pub use crate::tools;
 pub use builder::TextGenerationPipelineBuilder;
+pub use message::Message;
 pub use params::GenerationParams;
-pub use pipeline::{Input, TextGenerationPipeline};
-pub use stats::GenerationStats;
-pub use streaming::{CompletionStream, EventStream};
-pub use xml_pipeline::XmlGenerationPipeline;
-
-pub use crate::tool;
-
-pub use futures::StreamExt;
-pub use futures::TryStreamExt;
-
-pub use crate::{Message, MessageVecExt};
-
-pub use crate::Result;
-
-pub use std::io::Write;
-
-pub use parser::{Event, TagParts, XmlParser, XmlParserBuilder};
-pub use tools::{ErrorStrategy, IntoTool, Tool, ToolCalling, ToolFuture};
-
-#[macro_export]
-macro_rules! tools {
-    ($($tool:ident),+ $(,)?) => {
-        vec![
-            $(
-                $tool::__tool()
-            ),+
-        ]
-    };
-}
+pub use parser::TagParts;
+pub use pipeline::TextGenerationPipeline;
+pub use tools::{tool, tools, ErrorStrategy, Tool};

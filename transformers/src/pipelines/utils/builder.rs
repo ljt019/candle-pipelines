@@ -1,8 +1,8 @@
-use super::{build_cache_key, DeviceRequest, DeviceSelectable};
+use super::{build_cache_key, DeviceRequest};
+use crate::error::Result;
 use crate::pipelines::cache::{global_cache, ModelOptions};
-use crate::Result;
 
-pub trait BasePipelineBuilder<M>: DeviceSelectable + Sized
+pub trait BasePipelineBuilder<M>: Sized
 where
     M: Clone + Send + Sync + 'static,
 {
@@ -50,8 +50,8 @@ impl<Opts> StandardPipelineBuilder<Opts> {
     }
 }
 
-impl<Opts> DeviceSelectable for StandardPipelineBuilder<Opts> {
-    fn device_request_mut(&mut self) -> &mut DeviceRequest {
+impl<Opts> StandardPipelineBuilder<Opts> {
+    pub(crate) fn device_request_mut(&mut self) -> &mut DeviceRequest {
         &mut self.device_request
     }
 }

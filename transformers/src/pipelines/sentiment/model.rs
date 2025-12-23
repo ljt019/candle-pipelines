@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::error::Result;
 use tokenizers::Tokenizer;
 
 pub trait SentimentAnalysisModel {

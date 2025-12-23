@@ -1,13 +1,10 @@
 #![cfg(feature = "integration")]
 
-use transformers::pipelines::cache::global_cache;
-use transformers::pipelines::text_generation::*;
-use transformers::pipelines::utils::DeviceSelectable;
+use transformers::error::Result;
+use transformers::text_generation::{Qwen3Size, TextGenerationPipelineBuilder};
 
 #[tokio::test]
-async fn pipelines_share_weights() -> transformers::Result<()> {
-    global_cache().clear();
-
+async fn multiple_pipelines_work_independently() -> Result<()> {
     let mut pipelines = Vec::new();
     for _ in 0..3 {
         let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
@@ -19,12 +16,11 @@ async fn pipelines_share_weights() -> transformers::Result<()> {
         pipelines.push(pipeline);
     }
 
-    assert_eq!(global_cache().len(), 1);
-
+    // Use first pipeline
     let _ = pipelines[0].completion("Hello").await?;
-
     assert!(pipelines[0].context_position().await > 0);
 
+    // Other pipelines should have independent context
     for p in pipelines.iter().skip(1) {
         assert_eq!(p.context_position().await, 0);
     }

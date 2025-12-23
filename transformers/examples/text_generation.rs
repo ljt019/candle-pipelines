@@ -1,5 +1,5 @@
-use transformers::pipelines::text_generation::*;
-use transformers::Result;
+use transformers::error::Result;
+use transformers::text_generation::{Message, Qwen3Size, TextGenerationPipelineBuilder};
 
 #[tokio::main]
 async fn main() -> Result<()> {

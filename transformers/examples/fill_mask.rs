@@ -1,6 +1,5 @@
-use transformers::pipelines::fill_mask::*;
-use transformers::pipelines::utils::BasePipelineBuilder;
-use transformers::Result;
+use transformers::error::Result;
+use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 
 fn main() -> Result<()> {
     println!("Building pipeline...");

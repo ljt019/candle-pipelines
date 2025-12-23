@@ -1,10 +1,10 @@
 #![cfg(feature = "integration")]
 
-use transformers::pipelines::text_generation::*;
-use transformers::pipelines::utils::DeviceSelectable;
+use transformers::error::Result;
+use transformers::text_generation::{GenerationParams, Qwen3Size, TextGenerationPipelineBuilder};
 
 #[tokio::test]
-async fn text_generation_basic() -> transformers::Result<()> {
+async fn text_generation_basic() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(42)
@@ -19,7 +19,7 @@ async fn text_generation_basic() -> transformers::Result<()> {
 }
 
 #[tokio::test]
-async fn text_generation_streaming() -> transformers::Result<()> {
+async fn text_generation_streaming() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(42)
@@ -37,7 +37,7 @@ async fn text_generation_streaming() -> transformers::Result<()> {
 }
 
 #[tokio::test]
-async fn text_generation_params_update() -> transformers::Result<()> {
+async fn text_generation_params_update() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(42)

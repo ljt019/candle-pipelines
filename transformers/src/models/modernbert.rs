@@ -10,9 +10,9 @@ use std::collections::HashMap;
 use tokenizers::Tokenizer;
 
 use crate::error::{GenerationError, ModelMetadataError, TokenizationError};
+use crate::error::{Result, TransformersError};
 use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
-use crate::{Result, TransformersError};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ModernBertSize {

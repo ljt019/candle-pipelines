@@ -1,11 +1,11 @@
 #![cfg(feature = "integration")]
 
 use std::time::Instant;
-use transformers::pipelines::fill_mask::*;
-use transformers::pipelines::utils::{BasePipelineBuilder, DeviceSelectable};
+use transformers::error::Result;
+use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 
 #[test]
-fn fill_mask_basic() -> transformers::Result<()> {
+fn fill_mask_basic() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;
@@ -17,7 +17,7 @@ fn fill_mask_basic() -> transformers::Result<()> {
 }
 
 #[test]
-fn fill_mask_empty_input_errors() -> transformers::Result<()> {
+fn fill_mask_empty_input_errors() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;
@@ -27,7 +27,7 @@ fn fill_mask_empty_input_errors() -> transformers::Result<()> {
 }
 
 #[test]
-fn fill_mask_batch_faster_than_sequential() -> transformers::Result<()> {
+fn fill_mask_batch_faster_than_sequential() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;

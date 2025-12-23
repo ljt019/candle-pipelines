@@ -2,7 +2,7 @@ use serde::Deserialize;
 use tokio::time::Duration;
 
 use crate::error::{DownloadError, ModelMetadataError, TokenizationError};
-use crate::{Result, TransformersError};
+use crate::error::{Result, TransformersError};
 
 #[derive(Clone)]
 pub struct GenerationConfig {

@@ -1,8 +1,8 @@
 use super::model::{LanguageModelContext, TextGenerationModel};
 use super::params::{apply_repeat_penalty, initialize_logits_processor, GenerationParams};
 use super::stats::GenerationStats;
+use crate::error::Result;
 use crate::error::{GenerationError, TokenizationError};
-use crate::Result;
 use candle_core::Tensor;
 use std::sync::Arc;
 use tokenizers::Tokenizer;
@@ -15,7 +15,6 @@ pub struct BasePipeline<M: TextGenerationModel> {
     pub gen_params: Arc<Mutex<GenerationParams>>,
     pub device: candle_core::Device,
     pub last_processed_tokens: Arc<Mutex<Vec<u32>>>,
-    pub special_strings: std::collections::HashSet<String>,
     pub last_generation_stats: std::sync::Arc<std::sync::Mutex<Option<GenerationStats>>>,
 }
 
@@ -46,7 +45,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             gen_params: Arc::new(Mutex::new(gen_params)),
             device,
             last_processed_tokens: Arc::new(Mutex::new(Vec::new())),
-            special_strings,
             last_generation_stats: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
     }
@@ -162,19 +160,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             .replace(stats.clone());
 
         Ok((generated_tokens_str, stats))
-    }
-
-    pub fn token_stream<'a>(
-        &'a self,
-        input_tokens: Vec<u32>,
-    ) -> (
-        std::sync::Arc<std::sync::Mutex<GenerationStats>>,
-        impl futures::Stream<Item = Result<String>> + Send + 'a,
-    )
-    where
-        M: 'a + Send,
-    {
-        self.token_stream_with_prompt_count(input_tokens, None)
     }
 
     pub fn token_stream_with_prompt_count<'a>(

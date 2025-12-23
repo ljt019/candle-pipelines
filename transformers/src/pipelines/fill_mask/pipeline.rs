@@ -1,6 +1,6 @@
 use super::model::FillMaskModel;
 use crate::error::GenerationError;
-use crate::Result;
+use crate::error::Result;
 use tokenizers::Tokenizer;
 
 #[derive(Debug, Clone)]

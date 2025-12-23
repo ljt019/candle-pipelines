@@ -1,10 +1,11 @@
-pub mod builder;
-pub mod model;
-pub mod pipeline;
+// ============ Internal API ============
 
-pub use builder::ZeroShotClassificationPipelineBuilder;
-pub use model::ZeroShotClassificationModel;
-pub use pipeline::ZeroShotClassificationPipeline;
+pub(crate) mod builder;
+pub(crate) mod model;
+pub(crate) mod pipeline;
+
+// ============ Public API ============
 
 pub use crate::models::ModernBertSize;
-pub use crate::Result;
+pub use builder::ZeroShotClassificationPipelineBuilder;
+pub use pipeline::ZeroShotClassificationPipeline;

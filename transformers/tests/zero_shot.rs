@@ -1,11 +1,11 @@
 #![cfg(feature = "integration")]
 
 use std::time::Instant;
-use transformers::pipelines::utils::{BasePipelineBuilder, DeviceSelectable};
-use transformers::pipelines::zero_shot::*;
+use transformers::error::Result;
+use transformers::zero_shot::{ModernBertSize, ZeroShotClassificationPipelineBuilder};
 
 #[test]
-fn zero_shot_basic() -> transformers::Result<()> {
+fn zero_shot_basic() -> Result<()> {
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;
@@ -17,7 +17,7 @@ fn zero_shot_basic() -> transformers::Result<()> {
 }
 
 #[test]
-fn zero_shot_batch_faster_than_sequential() -> transformers::Result<()> {
+fn zero_shot_batch_faster_than_sequential() -> Result<()> {
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;

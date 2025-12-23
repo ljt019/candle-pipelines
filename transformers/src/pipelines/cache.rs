@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::error::Result;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -50,16 +50,19 @@ impl ModelCache {
         Ok(model)
     }
 
+    #[allow(dead_code)]
     pub fn clear(&self) {
         let mut cache = self.cache.lock().unwrap();
         cache.clear();
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         let cache = self.cache.lock().unwrap();
         cache.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         let cache = self.cache.lock().unwrap();
         cache.is_empty()

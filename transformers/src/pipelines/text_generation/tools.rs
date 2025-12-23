@@ -1,7 +1,9 @@
+use crate::error::Result;
 use crate::error::ToolError;
-use crate::Result;
 use futures::future::BoxFuture;
 use std::sync::Arc;
+
+pub use tool_macro::{tool, tools}; // re-export
 
 #[derive(Debug, Clone)]
 pub enum ErrorStrategy {
@@ -33,8 +35,6 @@ pub struct Tool {
     #[serde(skip_serializing)]
     pub(crate) function: Arc<dyn Fn(serde_json::Value) -> ToolFuture + Send + Sync>,
     #[serde(skip_serializing)]
-    pub(crate) error_strategy: ErrorStrategy,
-    #[serde(skip_serializing)]
     pub(crate) max_retries: u32,
 }
 
@@ -45,7 +45,6 @@ impl Clone for Tool {
             description: self.description.clone(),
             schema: self.schema.clone(),
             function: Arc::clone(&self.function),
-            error_strategy: self.error_strategy.clone(),
             max_retries: self.max_retries,
         }
     }
@@ -57,7 +56,6 @@ impl Tool {
         description: String,
         schema: schemars::schema::RootSchema,
         function: impl Fn(serde_json::Value) -> ToolFuture + Send + Sync + 'static,
-        error_strategy: ErrorStrategy,
         max_retries: u32,
     ) -> Self {
         Self {
@@ -65,7 +63,6 @@ impl Tool {
             description,
             schema,
             function: Arc::new(function),
-            error_strategy,
             max_retries,
         }
     }
@@ -85,10 +82,6 @@ impl Tool {
 
     pub fn description(&self) -> &str {
         &self.description
-    }
-
-    pub fn error_strategy(&self) -> &ErrorStrategy {
-        &self.error_strategy
     }
 
     pub fn max_retries(&self) -> u32 {
@@ -125,15 +118,5 @@ impl Tool {
                 .into())
             }
         }
-    }
-}
-
-pub trait IntoTool {
-    fn into_tool(self) -> Tool;
-}
-
-impl IntoTool for Tool {
-    fn into_tool(self) -> Tool {
-        self
     }
 }

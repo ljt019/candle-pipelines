@@ -1,8 +1,9 @@
 #![cfg(feature = "integration")]
 
-use transformers::pipelines::text_generation::*;
-use transformers::pipelines::utils::DeviceSelectable;
-use transformers::{Result, ToolError};
+use transformers::error::{Result, ToolError};
+use transformers::text_generation::{
+    tool, tools, ErrorStrategy, Qwen3Size, TextGenerationPipelineBuilder,
+};
 
 #[tool]
 fn get_weather(city: String) -> Result<String> {
@@ -10,11 +11,12 @@ fn get_weather(city: String) -> Result<String> {
 }
 
 #[tokio::test]
-async fn tool_calling_basic() -> transformers::Result<()> {
+async fn tool_calling_basic() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(42)
         .max_len(150)
+        .tool_error_strategy(ErrorStrategy::ReturnToModel)
         .build()
         .await?;
 
@@ -35,7 +37,7 @@ fn echo(msg: String) -> String {
 }
 
 #[tokio::test]
-async fn tool_registration() -> transformers::Result<()> {
+async fn tool_registration() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(0)
@@ -55,7 +57,7 @@ async fn tool_registration() -> transformers::Result<()> {
     Ok(())
 }
 
-#[tool(on_error = ErrorStrategy::Fail, retries = 1)]
+#[tool(retries = 1)]
 fn fail_tool() -> Result<String> {
     Err(ToolError::ExecutionFailed {
         name: "fail_tool".into(),
@@ -66,11 +68,12 @@ fn fail_tool() -> Result<String> {
 }
 
 #[tokio::test]
-async fn tool_error_fail_strategy() -> transformers::Result<()> {
+async fn tool_error_fail_strategy() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda_device(0)
         .seed(0)
         .max_len(200)
+        .tool_error_strategy(ErrorStrategy::Fail)
         .build()
         .await?;
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["transformers", "tool_macro"]
+members = ["transformers", "tool_macro", "test_sandbox"]
 resolver = "2"
 
 [workspace.dependencies]

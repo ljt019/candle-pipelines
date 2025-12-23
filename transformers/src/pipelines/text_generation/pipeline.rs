@@ -7,8 +7,8 @@ use super::model::{LanguageModelContext, ToggleableReasoning};
 use super::params::GenerationParams;
 use super::stats::GenerationStats;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
+use crate::error::Result;
 use crate::error::{TokenizationError, ToolError};
-use crate::Result;
 use async_stream::try_stream;
 use futures::StreamExt;
 use regex::Regex;
@@ -17,7 +17,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone)]
 pub enum Input<'a> {
     Prompt(&'a str),
-    Messages(&'a [crate::Message]),
+    Messages(&'a [super::message::Message]),
 }
 
 impl<'a> From<&'a str> for Input<'a> {
@@ -26,14 +26,14 @@ impl<'a> From<&'a str> for Input<'a> {
     }
 }
 
-impl<'a> From<&'a [crate::Message]> for Input<'a> {
-    fn from(m: &'a [crate::Message]) -> Self {
+impl<'a> From<&'a [super::message::Message]> for Input<'a> {
+    fn from(m: &'a [super::message::Message]) -> Self {
         Self::Messages(m)
     }
 }
 
-impl<'a> From<&'a Vec<crate::Message>> for Input<'a> {
-    fn from(v: &'a Vec<crate::Message>) -> Self {
+impl<'a> From<&'a Vec<super::message::Message>> for Input<'a> {
+    fn from(v: &'a Vec<super::message::Message>) -> Self {
         Self::Messages(v.as_slice())
     }
 }
@@ -46,6 +46,7 @@ impl<'a> From<&'a String> for Input<'a> {
 
 pub struct TextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
+    tool_error_strategy: ErrorStrategy,
 }
 
 impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
@@ -53,10 +54,16 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         model: M,
         gen_params: GenerationParams,
         device: candle_core::Device,
+        tool_error_strategy: ErrorStrategy,
     ) -> Result<Self> {
         Ok(Self {
             base: BasePipeline::new(model, gen_params, device).await?,
+            tool_error_strategy,
         })
+    }
+
+    pub fn tool_error_strategy(&self) -> &ErrorStrategy {
+        &self.tool_error_strategy
     }
 
     pub async fn context_position(&self) -> usize {
@@ -116,7 +123,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
 
     pub async fn chat_batch(
         &self,
-        conversations: &[&[crate::Message]],
+        conversations: &[&[super::message::Message]],
     ) -> Result<Vec<Result<String>>> {
         let mut outputs = Vec::with_capacity(conversations.len());
         for messages in conversations {
@@ -143,7 +150,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .model
             .lock()
             .await
-            .apply_chat_template(&[crate::Message::user(prompt)])?;
+            .apply_chat_template(&[super::message::Message::user(prompt)])?;
 
         let prompt_tokens = self
             .base
@@ -158,7 +165,10 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .await
     }
 
-    async fn message_completion_internal(&self, messages: &[crate::Message]) -> Result<String> {
+    async fn message_completion_internal(
+        &self,
+        messages: &[super::message::Message],
+    ) -> Result<String> {
         let (response, _) = self
             .message_completion_internal_with_stats(messages)
             .await?;
@@ -168,7 +178,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
 
     async fn message_completion_internal_with_stats(
         &self,
-        messages: &[crate::Message],
+        messages: &[super::message::Message],
     ) -> Result<(String, GenerationStats)> {
         let templated_prompt = self.base.model.lock().await.apply_chat_template(messages)?;
 
@@ -226,7 +236,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                     .model
                     .lock()
                     .await
-                    .apply_chat_template(&[crate::Message::user(p)])?;
+                    .apply_chat_template(&[super::message::Message::user(p)])?;
                 let tokens = self
                     .base
                     .model_tokenizer
@@ -352,7 +362,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                     Err(e) => {
                         attempts += 1;
                         if attempts >= tool.max_retries() {
-                            match tool.error_strategy() {
+                            match &self.tool_error_strategy {
                                 ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
                                     let error_msg = format!("Error: {e}");
@@ -382,7 +392,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         }
 
         let mut messages = match input.into() {
-            Input::Prompt(p) => vec![crate::Message::user(p)],
+            Input::Prompt(p) => vec![super::message::Message::user(p)],
             Input::Messages(m) => m.to_vec(),
         };
 
@@ -428,7 +438,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                 Ok(tool_calls) if !tool_calls.is_empty() => {
                     full_response.push_str(&response);
                     full_response.push('\n');
-                    messages.push(crate::Message::assistant(&response));
+                    messages.push(super::message::Message::assistant(&response));
 
                     let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
                     let tool_response_text = tool_responses.join("\n");
@@ -437,7 +447,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                     full_response.push_str(&tool_response_text);
                     full_response.push('\n');
 
-                    messages.push(crate::Message::user(&tool_response_text));
+                    messages.push(super::message::Message::user(&tool_response_text));
                     continue;
                 }
                 _ => {
@@ -467,7 +477,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         }
 
         let initial_messages = match input.into() {
-            Input::Prompt(p) => vec![crate::Message::user(p)],
+            Input::Prompt(p) => vec![super::message::Message::user(p)],
             Input::Messages(m) => m.to_vec(),
         };
 
@@ -503,7 +513,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
 
                 match Self::extract_tool_calls(&response_buffer) {
                     Ok(tool_calls) if !tool_calls.is_empty() => {
-                        messages.push(crate::Message::assistant(&response_buffer));
+                        messages.push(super::message::Message::assistant(&response_buffer));
                         response_buffer.clear();
 
                         let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
@@ -511,7 +521,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
 
                         yield format!("\n\n{}\n", tool_response_text);
 
-                        messages.push(crate::Message::user(&tool_response_text));
+                        messages.push(super::message::Message::user(&tool_response_text));
                         needs_spacing = true;
 
                     }

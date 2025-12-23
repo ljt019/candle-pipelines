@@ -1,7 +1,12 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Attribute, Expr, FnArg, ItemFn, Lit, Meta, Pat, ReturnType, Type};
+use syn::{
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    punctuated::Punctuated,
+    Attribute, Expr, FnArg, Ident, ItemFn, Lit, Meta, Pat, ReturnType, Token, Type,
+};
 
 fn extract_doc(attrs: &[Attribute]) -> String {
     let mut out = String::new();
@@ -22,59 +27,30 @@ fn extract_doc(attrs: &[Attribute]) -> String {
     out
 }
 
-fn parse_tool_config(args: TokenStream) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
-    let default_error_strategy =
-        quote! { transformers::pipelines::text_generation::ErrorStrategy::Fail };
+fn parse_tool_config(args: TokenStream) -> proc_macro2::TokenStream {
     let default_retries = quote! { 3u32 };
 
     if args.is_empty() {
-        return (default_error_strategy, default_retries);
+        return default_retries;
     }
-
-    let mut error_strategy = default_error_strategy;
-    let mut retries = default_retries;
 
     let args_str = args.to_string();
 
     for part in args_str.split(',') {
         let part = part.trim();
 
-        if part.starts_with("on_error") {
-            if let Some(value_part) = part.split('=').nth(1) {
-                let value_part = value_part.trim();
-                if let Ok(expr) = syn::parse_str::<syn::Expr>(value_part) {
-                    error_strategy = parse_error_strategy_from_expr(&expr);
-                }
-            }
-        } else if part.starts_with("retries") {
+        if part.starts_with("retries") {
             if let Some(value_part) = part.split('=').nth(1) {
                 let value_part = value_part.trim();
                 if let Ok(lit) = syn::parse_str::<syn::LitInt>(value_part) {
                     let retry_count = lit.base10_parse::<u32>().unwrap_or(3);
-                    retries = quote! { #retry_count };
+                    return quote! { #retry_count };
                 }
             }
         }
     }
 
-    (error_strategy, retries)
-}
-
-fn parse_error_strategy_from_expr(expr: &syn::Expr) -> proc_macro2::TokenStream {
-    let expr_str = quote!(#expr).to_string();
-
-    let expr_str = expr_str.replace(" ", "");
-
-    if expr_str == "Fail" || expr_str.contains("ErrorStrategy::Fail") {
-        quote! { transformers::pipelines::text_generation::ErrorStrategy::Fail }
-    } else if expr_str == "ReturnToModel" || expr_str.contains("ErrorStrategy::ReturnToModel") {
-        quote! { transformers::pipelines::text_generation::ErrorStrategy::ReturnToModel }
-    } else {
-        syn::Error::new_spanned(
-            expr,
-            "Unknown error strategy. Valid options are: ErrorStrategy::Fail, ErrorStrategy::ReturnToModel"
-        ).to_compile_error()
-    }
+    default_retries
 }
 
 fn returns_result(output: &ReturnType) -> bool {
@@ -90,7 +66,7 @@ fn returns_result(output: &ReturnType) -> bool {
 
 #[proc_macro_attribute]
 pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
-    let (error_strategy, max_retries) = parse_tool_config(args);
+    let max_retries = parse_tool_config(args);
 
     let input_fn = parse_macro_input!(item as ItemFn);
 
@@ -131,7 +107,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             Box::pin(async move {
                 let parsed: #params_struct_name = serde_json::from_value(parameters)
-                    .map_err(|e| transformers::TransformersError::Tool(
+                    .map_err(|e| transformers::error::TransformersError::Tool(
                         transformers::error::ToolError::InvalidParams {
                             name: #fn_name_str.to_string(),
                             reason: e.to_string(),
@@ -142,7 +118,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
 
                 match result {
                     Ok(s) => Ok(s),
-                    Err(e) => Err(transformers::TransformersError::Tool(
+                    Err(e) => Err(transformers::error::TransformersError::Tool(
                         transformers::error::ToolError::ExecutionFailed {
                             name: #fn_name_str.to_string(),
                             attempts: 1,
@@ -156,7 +132,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             Box::pin(async move {
                 let parsed: #params_struct_name = serde_json::from_value(parameters)
-                    .map_err(|e| transformers::TransformersError::Tool(
+                    .map_err(|e| transformers::error::TransformersError::Tool(
                         transformers::error::ToolError::InvalidParams {
                             name: #fn_name_str.to_string(),
                             reason: e.to_string(),
@@ -180,7 +156,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[doc(hidden)]
-        fn #wrapper_name(parameters: serde_json::Value) -> transformers::pipelines::text_generation::ToolFuture {
+        fn #wrapper_name(parameters: serde_json::Value) -> transformers::text_generation::ToolFuture {
             #wrapper_body
         }
 
@@ -190,15 +166,14 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[doc(hidden)]
-        pub fn #tool_builder_name() -> transformers::pipelines::text_generation::Tool {
+        pub fn #tool_builder_name() -> transformers::text_generation::Tool {
             let schema = #schema_fn_name();
 
-            transformers::pipelines::text_generation::Tool::new(
+            transformers::text_generation::Tool::new(
                 #fn_name_str.to_string(),
                 #description.to_string(),
                 schema,
                 #wrapper_name,
-                #error_strategy,
                 #max_retries,
             )
         }
@@ -207,10 +182,37 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         pub mod #fn_name_ident {
             use super::*;
 
-            pub fn __tool() -> transformers::pipelines::text_generation::Tool {
+            pub fn __tool() -> transformers::text_generation::Tool {
                 #tool_builder_name()
             }
         }
+    };
+
+    TokenStream::from(expanded)
+}
+
+struct ToolsList {
+    tools: Punctuated<Ident, Token![,]>,
+}
+
+impl Parse for ToolsList {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(ToolsList {
+            tools: Punctuated::parse_terminated(input)?,
+        })
+    }
+}
+
+#[proc_macro]
+pub fn tools(input: TokenStream) -> TokenStream {
+    let ToolsList { tools } = parse_macro_input!(input as ToolsList);
+
+    let tool_calls = tools.iter().map(|ident| {
+        quote! { #ident::__tool() }
+    });
+
+    let expanded = quote! {
+        vec![#(#tool_calls),*]
     };
 
     TokenStream::from(expanded)

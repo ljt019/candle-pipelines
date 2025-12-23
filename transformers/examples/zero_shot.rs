@@ -1,6 +1,5 @@
-use transformers::pipelines::utils::BasePipelineBuilder;
-use transformers::pipelines::zero_shot::*;
-use transformers::Result;
+use transformers::error::Result;
+use transformers::zero_shot::{ModernBertSize, ZeroShotClassificationPipelineBuilder};
 
 fn main() -> Result<()> {
     println!("Building pipeline...");

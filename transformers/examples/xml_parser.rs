@@ -1,5 +1,7 @@
-use transformers::pipelines::text_generation::*;
-use transformers::Result;
+use transformers::error::Result;
+use transformers::text_generation::{
+    tool, tools, Qwen3Size, TagParts, TextGenerationPipelineBuilder,
+};
 
 #[tool]
 /// Gets the current weather in a given city

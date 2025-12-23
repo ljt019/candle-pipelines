@@ -59,6 +59,7 @@ impl Message {
     }
 }
 
+#[allow(dead_code)]
 pub trait MessageVecExt {
     fn last_user(&self) -> Option<&str>;
     fn last_assistant(&self) -> Option<&str>;

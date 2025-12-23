@@ -1,6 +1,6 @@
 use super::cache::ModelOptions;
 use crate::error::DeviceError;
-use crate::Result;
+use crate::error::Result;
 use candle_core::{CudaDevice, Device};
 
 pub mod builder;
@@ -11,7 +11,6 @@ pub enum DeviceRequest {
     #[default]
     Cpu,
     Cuda(usize),
-    Explicit(Device),
 }
 
 impl DeviceRequest {
@@ -29,29 +28,41 @@ impl DeviceRequest {
                         .into()
                     })
             }
-            DeviceRequest::Explicit(d) => Ok(d),
         }
     }
 }
 
-pub trait DeviceSelectable: Sized {
-    fn device_request_mut(&mut self) -> &mut DeviceRequest;
+macro_rules! impl_device_methods {
+    (direct: $builder:ident < $($gen:ident : $bound:path),* >) => {
+        impl<$($gen: $bound),*> $builder<$($gen),*> {
+            pub fn cpu(mut self) -> Self {
+                self.device_request = crate::pipelines::utils::DeviceRequest::Cpu;
+                self
+            }
 
-    fn cpu(mut self) -> Self {
-        *self.device_request_mut() = DeviceRequest::Cpu;
-        self
-    }
+            pub fn cuda_device(mut self, index: usize) -> Self {
+                self.device_request = crate::pipelines::utils::DeviceRequest::Cuda(index);
+                self
+            }
+        }
+    };
 
-    fn cuda_device(mut self, index: usize) -> Self {
-        *self.device_request_mut() = DeviceRequest::Cuda(index);
-        self
-    }
+    (delegated: $builder:ident < $($gen:ident : $bound:path),* >) => {
+        impl<$($gen: $bound),*> $builder<$($gen),*> {
+            pub fn cpu(mut self) -> Self {
+                *self.0.device_request_mut() = crate::pipelines::utils::DeviceRequest::Cpu;
+                self
+            }
 
-    fn device(mut self, device: Device) -> Self {
-        *self.device_request_mut() = DeviceRequest::Explicit(device);
-        self
-    }
+            pub fn cuda_device(mut self, index: usize) -> Self {
+                *self.0.device_request_mut() = crate::pipelines::utils::DeviceRequest::Cuda(index);
+                self
+            }
+        }
+    };
 }
+
+pub(crate) use impl_device_methods;
 
 pub fn build_cache_key<O: ModelOptions>(options: &O, device: &Device) -> String {
     format!("{}-{:?}", options.cache_key(), device.location())

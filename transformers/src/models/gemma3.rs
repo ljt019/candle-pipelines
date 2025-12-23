@@ -10,11 +10,11 @@ use minijinja_contrib::{add_to_environment, pycompat};
 use tokenizers::Tokenizer;
 use tokio::fs;
 
+use crate::error::Result;
 use crate::error::{ChatTemplateError, ModelMetadataError};
 use crate::loaders::GenerationConfig;
 use crate::loaders::{GenerationConfigLoader, GgufModelLoader, HfLoader, TokenizerLoader};
 use crate::pipelines::text_generation::model::{LanguageModelContext, TextGenerationModel};
-use crate::Result;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Gemma3Size {
@@ -71,6 +71,7 @@ impl crate::pipelines::cache::ModelOptions for Gemma3Size {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
     pub num_layers: usize,
@@ -291,10 +292,6 @@ impl LanguageModelContext for Context {
     fn position(&self) -> usize {
         self.position
     }
-
-    fn can_continue_from(&self, position: usize) -> bool {
-        self.position == position
-    }
 }
 
 impl TextGenerationModel for Gemma3Model {
@@ -309,7 +306,10 @@ impl TextGenerationModel for Gemma3Model {
         Gemma3Model::get_tokenizer(self).await
     }
 
-    fn apply_chat_template(&self, messages: &[crate::Message]) -> Result<String> {
+    fn apply_chat_template(
+        &self,
+        messages: &[crate::pipelines::text_generation::message::Message],
+    ) -> Result<String> {
         let message_count = messages.len();
 
         let rendered = self

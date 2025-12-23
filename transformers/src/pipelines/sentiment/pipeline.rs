@@ -1,5 +1,5 @@
 use super::model::SentimentAnalysisModel;
-use crate::Result;
+use crate::error::Result;
 use tokenizers::Tokenizer;
 
 #[derive(Debug, Clone)]

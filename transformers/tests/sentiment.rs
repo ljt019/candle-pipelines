@@ -1,11 +1,11 @@
 #![cfg(feature = "integration")]
 
 use std::time::Instant;
-use transformers::pipelines::sentiment::*;
-use transformers::pipelines::utils::{BasePipelineBuilder, DeviceSelectable};
+use transformers::error::Result;
+use transformers::sentiment::{ModernBertSize, SentimentAnalysisPipelineBuilder};
 
 #[test]
-fn sentiment_basic() -> transformers::Result<()> {
+fn sentiment_basic() -> Result<()> {
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;
@@ -17,7 +17,7 @@ fn sentiment_basic() -> transformers::Result<()> {
 }
 
 #[test]
-fn sentiment_batch_faster_than_sequential() -> transformers::Result<()> {
+fn sentiment_batch_faster_than_sequential() -> Result<()> {
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
         .cuda_device(0)
         .build()?;

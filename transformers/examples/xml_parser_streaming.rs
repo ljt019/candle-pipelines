@@ -1,6 +1,9 @@
 use std::io::Write;
-use transformers::pipelines::text_generation::*;
-use transformers::Result;
+
+use transformers::error::Result;
+use transformers::text_generation::{
+    tool, tools, Qwen3Size, TagParts, TextGenerationPipelineBuilder,
+};
 
 #[tool]
 /// Calculates the average speed given distance and time

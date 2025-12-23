@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::error::Result;
 use futures::Stream;
 use futures::StreamExt;
 use pin_project_lite::pin_project;

@@ -5,8 +5,8 @@ use super::params::GenerationParams;
 use super::parser::{Event, XmlParser};
 use super::pipeline::Input;
 use super::tools::{ErrorStrategy, Tool, ToolCalling};
+use crate::error::Result;
 use crate::error::{TokenizationError, ToolError};
-use crate::Result;
 use async_stream::stream;
 use futures::Stream;
 use futures::StreamExt;
@@ -16,6 +16,7 @@ use serde::Deserialize;
 pub struct XmlGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
     xml_parser: XmlParser,
+    tool_error_strategy: ErrorStrategy,
 }
 
 impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
@@ -24,10 +25,12 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         gen_params: GenerationParams,
         xml_parser: XmlParser,
         device: candle_core::Device,
+        tool_error_strategy: ErrorStrategy,
     ) -> Result<Self> {
         Ok(Self {
             base: BasePipeline::new(model, gen_params, device).await?,
             xml_parser,
+            tool_error_strategy,
         })
     }
 
@@ -60,7 +63,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
             .model
             .lock()
             .await
-            .apply_chat_template(&[crate::Message::user(prompt)])?;
+            .apply_chat_template(&[super::message::Message::user(prompt)])?;
 
         let prompt_tokens = self
             .base
@@ -73,7 +76,10 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
         self.base.completion_from_tokens(&prompt_tokens).await
     }
 
-    async fn message_completion_internal(&self, messages: &[crate::Message]) -> Result<String> {
+    async fn message_completion_internal(
+        &self,
+        messages: &[super::message::Message],
+    ) -> Result<String> {
         let templated_prompt = self.base.model.lock().await.apply_chat_template(messages)?;
 
         let new_tokens = self
@@ -124,7 +130,7 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
                     .model
                     .lock()
                     .await
-                    .apply_chat_template(&[crate::Message::user(p)])?;
+                    .apply_chat_template(&[super::message::Message::user(p)])?;
                 let tokens = self
                     .base
                     .model_tokenizer
@@ -268,7 +274,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                     Err(e) => {
                         attempts += 1;
                         if attempts >= tool.max_retries() {
-                            match tool.error_strategy() {
+                            match &self.tool_error_strategy {
                                 ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
                                     let error_msg = format!("Error: {e}");
@@ -301,7 +307,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         }
 
         let mut messages = match input.into() {
-            Input::Prompt(p) => vec![crate::Message::user(p)],
+            Input::Prompt(p) => vec![super::message::Message::user(p)],
             Input::Messages(m) => m.to_vec(),
         };
 
@@ -346,7 +352,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
             match Self::extract_tool_calls(&response) {
                 Ok(tool_calls) if !tool_calls.is_empty() => {
                     full_response.push_str(&response);
-                    messages.push(crate::Message::assistant(&response));
+                    messages.push(super::message::Message::assistant(&response));
 
                     let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
                     let tool_response_text = tool_responses.join("\n");
@@ -355,7 +361,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                     full_response.push_str(&tool_response_text);
                     full_response.push('\n');
 
-                    messages.push(crate::Message::user(&tool_response_text));
+                    messages.push(super::message::Message::user(&tool_response_text));
                     continue;
                 }
                 _ => {
@@ -385,7 +391,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
         }
 
         let initial_messages = match input.into() {
-            Input::Prompt(p) => vec![crate::Message::user(p)],
+            Input::Prompt(p) => vec![super::message::Message::user(p)],
             Input::Messages(m) => m.to_vec(),
         };
 
@@ -460,7 +466,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
 
                 match Self::extract_tool_calls(&raw_buffer) {
                     Ok(tool_calls) if !tool_calls.is_empty() => {
-                        messages.push(crate::Message::assistant(&raw_buffer));
+                        messages.push(super::message::Message::assistant(&raw_buffer));
                         raw_buffer.clear();
 
                         let tool_responses = match self.execute_tool_calls(tool_calls, &tools).await {
@@ -476,7 +482,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
                             yield event;
                         }
 
-                        messages.push(crate::Message::user(&tool_response_text));
+                        messages.push(super::message::Message::user(&tool_response_text));
 
                         xml_parser.reset();
 

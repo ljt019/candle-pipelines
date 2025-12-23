@@ -1,6 +1,5 @@
-use transformers::pipelines::sentiment::*;
-use transformers::pipelines::utils::BasePipelineBuilder;
-use transformers::Result;
+use transformers::error::Result;
+use transformers::sentiment::{ModernBertSize, SentimentAnalysisPipelineBuilder};
 
 fn main() -> Result<()> {
     println!("Building pipeline...");

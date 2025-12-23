@@ -1,10 +1,10 @@
 use super::model::FillMaskModel;
 use super::pipeline::FillMaskPipeline;
 use crate::pipelines::cache::ModelOptions;
-use crate::pipelines::utils::{
-    BasePipelineBuilder, DeviceRequest, DeviceSelectable, StandardPipelineBuilder,
-};
-use crate::Result;
+use crate::pipelines::utils::{BasePipelineBuilder, DeviceRequest, StandardPipelineBuilder};
+use crate::error::Result;
+
+crate::pipelines::utils::impl_device_methods!(delegated: FillMaskPipelineBuilder<M: FillMaskModel>);
 
 pub struct FillMaskPipelineBuilder<M: FillMaskModel>(StandardPipelineBuilder<M::Options>);
 
@@ -12,13 +12,16 @@ impl<M: FillMaskModel> FillMaskPipelineBuilder<M> {
     pub fn new(options: M::Options) -> Self {
         Self(StandardPipelineBuilder::new(options))
     }
-}
 
-impl<M: FillMaskModel> DeviceSelectable for FillMaskPipelineBuilder<M> {
-    fn device_request_mut(&mut self) -> &mut DeviceRequest {
-        self.0.device_request_mut()
+    pub fn build(self) -> Result<FillMaskPipeline<M>>
+    where
+        M: Clone + Send + Sync + 'static,
+        M::Options: ModelOptions + Clone,
+    {
+        BasePipelineBuilder::build(self)
     }
 }
+
 
 impl<M: FillMaskModel> BasePipelineBuilder<M> for FillMaskPipelineBuilder<M>
 where
