@@ -14,7 +14,6 @@ crate::pipelines::utils::impl_device_methods!(direct: TextGenerationPipelineBuil
 
 pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
     model_options: M::Options,
-    gen_params: GenerationParams,
     device_request: DeviceRequest,
     tool_error_strategy: ErrorStrategy,
 }
@@ -23,7 +22,6 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     pub fn new(options: M::Options) -> Self {
         Self {
             model_options: options,
-            gen_params: GenerationParams::default(),
             device_request: DeviceRequest::Cpu,
             tool_error_strategy: ErrorStrategy::default(),
         }
@@ -35,12 +33,12 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     }
 
     pub fn temperature(mut self, temperature: f64) -> Self {
-        self.gen_params.temperature = temperature;
+        self.temperature = Some(temperature);
         self
     }
 
     pub fn repeat_penalty(mut self, repeat_penalty: f32) -> Self {
-        self.gen_params.repeat_penalty = repeat_penalty;
+        self.repeat_penalty = Some(repeat_penalty);
         self
     }
 
@@ -49,37 +47,37 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     }
 
     pub fn repeat_last_n(mut self, repeat_last_n: usize) -> Self {
-        self.gen_params.repeat_last_n = repeat_last_n;
+        self.repeat_last_n = Some(repeat_last_n);
         self
     }
 
     pub fn seed(mut self, seed: u64) -> Self {
-        self.gen_params.seed = seed;
+        self.seed = Some(seed);
         self
     }
 
     pub fn max_len(mut self, max_len: usize) -> Self {
-        self.gen_params.max_len = max_len;
+        self.max_len = Some(max_len);
         self
     }
 
     pub fn max_new_tokens(mut self, max_new_tokens: usize) -> Self {
-        self.gen_params.max_len = max_new_tokens;
+        self.max_len = Some(max_new_tokens);
         self
     }
 
     pub fn top_p(mut self, top_p: f64) -> Self {
-        self.gen_params.top_p = Some(top_p.clamp(0.0, 1.0));
+        self.top_p = Some(top_p.clamp(0.0, 1.0));
         self
     }
 
     pub fn top_k(mut self, top_k: usize) -> Self {
-        self.gen_params.top_k = Some(top_k);
+        self.top_k = Some(top_k);
         self
     }
 
     pub fn min_p(mut self, min_p: f64) -> Self {
-        self.gen_params.min_p = Some(min_p.clamp(0.0, 1.0));
+        self.min_p = Some(min_p.clamp(0.0, 1.0));
         self
     }
 
@@ -117,6 +115,19 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
                 M::new(options, device_for_model).await
             })
             .await?;
+
+        // Start with model's recommended defaults, override with user-specified values
+        let defaults = model.default_generation_params();
+        let params = GenerationParams {
+            temperature: self.temperature.unwrap_or(defaults.temperature),
+            repeat_penalty: self.repeat_penalty.unwrap_or(defaults.repeat_penalty),
+            repeat_last_n: self.repeat_last_n.unwrap_or(defaults.repeat_last_n),
+            seed: self.seed.unwrap_or_else(rand::random),
+            max_len: self.max_len.unwrap_or(defaults.max_len),
+            top_p: self.top_p.or(defaults.top_p),
+            top_k: self.top_k.or(defaults.top_k),
+            min_p: self.min_p.or(defaults.min_p),
+        };
 
         let mut builder = XmlParserBuilder::new();
         for tag in tags {
