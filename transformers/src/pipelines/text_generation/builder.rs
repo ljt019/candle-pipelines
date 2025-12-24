@@ -8,7 +8,7 @@ use crate::pipelines::utils::{build_cache_key, DeviceRequest};
 use super::model::TextGenerationModel;
 use super::parser::XmlParserBuilder;
 use super::pipeline::TextGenerationPipeline;
-use super::xml_pipeline::XmlGenerationPipeline;
+use super::xml_pipeline::XmlTextGenerationPipeline;
 
 crate::pipelines::utils::impl_device_methods!(direct: TextGenerationPipelineBuilder<M: TextGenerationModel>);
 
@@ -102,7 +102,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy).await
     }
 
-    pub async fn build_xml(self, tags: &[&str]) -> Result<XmlGenerationPipeline<M>>
+    pub async fn build_xml(self, tags: &[&str]) -> Result<XmlTextGenerationPipeline<M>>
     where
         M: Clone + Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
@@ -123,7 +123,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             builder.register_tag(*tag);
         }
         let xml_parser = builder.build();
-        XmlGenerationPipeline::new(
+        XmlTextGenerationPipeline::new(
             model,
             self.gen_params,
             xml_parser,

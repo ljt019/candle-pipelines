@@ -93,8 +93,8 @@ impl Event {
         Self::tagged(tag, TagParts::Start, "")
     }
 
-    pub(crate) fn end(tag: Tag) -> Self {
-        Self::tagged(tag, TagParts::End, "")
+    pub(crate) fn end(tag: Tag, full_xml: impl Into<String>) -> Self {
+        Self::tagged(tag, TagParts::End, full_xml)
     }
 
     fn tagged_internal(tag: Tag, content: impl Into<String>) -> Self {
@@ -118,6 +118,26 @@ impl Event {
         match self {
             Self::Tagged { part, .. } | Self::Output { part, .. } => *part,
         }
+    }
+
+    pub fn parse_tool_call(&self) -> Option<(String, serde_json::Value)> {
+        let tag = self.tag()?;
+        if tag != "tool_call" || self.part() != TagParts::End {
+            return None;
+        }
+
+        let content = self.get_content();
+
+        let inner = content
+            .strip_prefix("<tool_call>")?
+            .strip_suffix("</tool_call>")?
+            .trim();
+
+        let parsed: serde_json::Value = serde_json::from_str(inner).ok()?;
+        let name = parsed.get("name")?.as_str()?.to_string();
+        let arguments = parsed.get("arguments")?.clone();
+
+        Some((name, arguments))
     }
 }
 
@@ -336,7 +356,8 @@ impl XmlParser {
                                     ));
                                 }
                             }
-                            events.push(Event::end(tag_handle.clone()));
+                            let full_xml = format!("<{}>{}</{}>", tag_name, content, tag_name);
+                            events.push(Event::end(tag_handle.clone(), full_xml));
                         }
                     }
                 } else if !tag_content.ends_with("/>") {
@@ -466,7 +487,8 @@ impl XmlParser {
                         events.push(Event::tagged_internal(tag_handle.clone(), final_str));
                     }
                 }
-                events.push(Event::end(tag_handle.clone()));
+                let full_xml = format!("<{}>{}</{}>", tag_name, content, tag_name);
+                events.push(Event::end(tag_handle.clone(), full_xml));
             }
         }
 

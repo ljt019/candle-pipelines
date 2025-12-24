@@ -84,6 +84,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let mut param_fields = Vec::new();
     let mut param_idents = Vec::new();
+    let mut param_types = Vec::new();
 
     for arg in input_fn.sig.inputs.iter() {
         if let FnArg::Typed(pat_type) = arg {
@@ -93,6 +94,7 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
 
                 param_fields.push(quote! { pub #param_name: #ty });
                 param_idents.push(quote! { #param_name });
+                param_types.push(quote! { #ty });
             }
         }
     }
@@ -150,9 +152,40 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
 
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
-        #[derive(serde::Deserialize, schemars::JsonSchema)]
+        #[derive(serde::Deserialize)]
         struct #params_struct_name {
             #( #param_fields ),*
+        }
+
+        impl transformers::text_generation::schemars::JsonSchema for #params_struct_name {
+            fn schema_name() -> String {
+                stringify!(#params_struct_name).to_string()
+            }
+
+            fn json_schema(gen: &mut transformers::text_generation::schemars::gen::SchemaGenerator) -> transformers::text_generation::schemars::schema::Schema {
+                let mut schema_object = transformers::text_generation::schemars::schema::SchemaObject {
+                    instance_type: Some(transformers::text_generation::schemars::schema::InstanceType::Object.into()),
+                    ..Default::default()
+                };
+                let mut properties = transformers::text_generation::schemars::Map::new();
+                let mut required = std::collections::BTreeSet::new();
+
+                #(
+                    properties.insert(
+                        stringify!(#param_idents).to_string(),
+                        gen.subschema_for::<#param_types>(),
+                    );
+                    required.insert(stringify!(#param_idents).to_string());
+                )*
+
+                schema_object.object = Some(Box::new(transformers::text_generation::schemars::schema::ObjectValidation {
+                    properties,
+                    required,
+                    ..Default::default()
+                }));
+
+                transformers::text_generation::schemars::schema::Schema::Object(schema_object)
+            }
         }
 
         #[doc(hidden)]
@@ -161,8 +194,9 @@ pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[doc(hidden)]
-        fn #schema_fn_name() -> schemars::schema::RootSchema {
-            schemars::schema_for!(#params_struct_name)
+        fn #schema_fn_name() -> transformers::text_generation::schemars::schema::RootSchema {
+            let gen = transformers::text_generation::schemars::gen::SchemaGenerator::default();
+            gen.into_root_schema_for::<#params_struct_name>()
         }
 
         #[doc(hidden)]

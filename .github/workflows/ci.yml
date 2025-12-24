@@ -21,7 +21,7 @@ jobs:
       - run: cargo fmt --all --check
 
   check:
-    name: Check
+    name: Compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

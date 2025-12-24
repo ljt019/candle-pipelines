@@ -13,11 +13,13 @@ pub(crate) mod tools;
 pub(crate) mod xml_pipeline;
 
 #[doc(hidden)]
+pub use schemars; // For tool_macro
+#[doc(hidden)]
 pub use tools::ToolFuture; // For tool_macro
 
 // ============ Public API ============
 
-pub use crate::models::{Gemma3Size, Qwen3Size};
+pub use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
 pub use builder::TextGenerationPipelineBuilder;
 pub use message::Message;
 pub use params::GenerationParams;
@@ -25,3 +27,4 @@ pub use parser::TagParts;
 pub use pipeline::TextGenerationPipeline;
 pub use tool_macro::{tool, tools};
 pub use tools::{ErrorStrategy, Tool};
+pub use xml_pipeline::XmlTextGenerationPipeline;

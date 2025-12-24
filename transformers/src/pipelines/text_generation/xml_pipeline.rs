@@ -13,13 +13,13 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
-pub struct XmlGenerationPipeline<M: TextGenerationModel> {
+pub struct XmlTextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
     xml_parser: XmlParser,
     tool_error_strategy: ErrorStrategy,
 }
 
-impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
+impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
     pub async fn new(
         model: M,
         gen_params: GenerationParams,
@@ -207,13 +207,13 @@ impl<M: TextGenerationModel + Send> XmlGenerationPipeline<M> {
     }
 }
 
-impl<M: TextGenerationModel + ToggleableReasoning> XmlGenerationPipeline<M> {
+impl<M: TextGenerationModel + ToggleableReasoning> XmlTextGenerationPipeline<M> {
     pub async fn set_reasoning(&self, enable: bool) -> Result<()> {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
-impl<M: TextGenerationModel + ToolCalling + Send> XmlGenerationPipeline<M> {
+impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
     pub async fn unregister_tool(&self, name: &str) -> Result<()> {
         self.base.model.lock().await.unregister_tool(name)
     }
