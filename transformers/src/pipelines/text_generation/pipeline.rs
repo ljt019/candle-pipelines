@@ -113,7 +113,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
-    pub async fn completion_batch<'a>(&self, prompts: &[&'a str]) -> Result<Vec<Result<String>>> {
+    pub async fn completion_batch(&self, prompts: &[&str]) -> Result<Vec<Result<String>>> {
         let mut outputs = Vec::with_capacity(prompts.len());
         for prompt in prompts {
             outputs.push(self.prompt_completion_internal(prompt).await);

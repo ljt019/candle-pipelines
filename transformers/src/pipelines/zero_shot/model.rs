@@ -1,6 +1,8 @@
 use crate::error::Result;
 use tokenizers::Tokenizer;
 
+pub type LabelScores = Vec<(String, f32)>;
+
 pub trait ZeroShotClassificationModel {
     type Options: std::fmt::Debug + Clone;
 
@@ -13,14 +15,14 @@ pub trait ZeroShotClassificationModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>>;
+    ) -> Result<LabelScores>;
 
     fn predict_batch(
         &self,
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<LabelScores>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict(tokenizer, text, candidate_labels))
@@ -32,14 +34,14 @@ pub trait ZeroShotClassificationModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>>;
+    ) -> Result<LabelScores>;
 
     fn predict_multi_label_batch(
         &self,
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<LabelScores>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict_multi_label(tokenizer, text, candidate_labels))

@@ -3,16 +3,11 @@ use crate::error::ToolError;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ErrorStrategy {
+    #[default]
     Fail,
     ReturnToModel,
-}
-
-impl Default for ErrorStrategy {
-    fn default() -> Self {
-        Self::Fail
-    }
 }
 
 pub trait ToolCalling {

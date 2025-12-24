@@ -13,6 +13,7 @@ use crate::error::{GenerationError, ModelMetadataError, TokenizationError};
 use crate::error::{Result, TransformersError};
 use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
+use crate::pipelines::zero_shot::model::LabelScores;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ModernBertSize {
@@ -220,7 +221,7 @@ impl crate::pipelines::fill_mask::model::FillMaskModel for FillMaskModernBertMod
                 }
                 Err(e) => {
                     error_results[i] =
-                        Some(TokenizationError::encode_failed(*text, e.to_string()).into());
+                        Some(TokenizationError::encode_failed(text, e.to_string()).into());
                     mask_indices.push(0);
                     encodings.push(None);
                 }
@@ -351,7 +352,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
@@ -360,7 +361,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         let mut results = self.predict_raw(tokenizer, text, candidate_labels)?;
         let sum: f32 = results.iter().map(|(_, p)| p).sum();
         if sum > 0.0 {
@@ -376,7 +377,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         self.predict_raw(tokenizer, text, candidate_labels)
     }
 
@@ -385,7 +386,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         if candidate_labels.is_empty() {
             return Ok(vec![]);
         }
@@ -446,7 +447,7 @@ impl ZeroShotModernBertModel {
             .i((.., entailment_id as usize))?
             .to_vec1::<f32>()?;
 
-        let mut results: Vec<(String, f32)> = candidate_labels
+        let mut results: LabelScores = candidate_labels
             .iter()
             .map(|&l| l.to_string())
             .zip(entailment_probs)
@@ -461,7 +462,7 @@ impl ZeroShotModernBertModel {
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<LabelScores>>> {
         if texts.is_empty() {
             return Ok(vec![]);
         }
@@ -504,7 +505,7 @@ impl ZeroShotModernBertModel {
                     Ok(encoding) => all_encodings.push(Some(encoding)),
                     Err(e) => {
                         error_results[text_idx] =
-                            Some(TokenizationError::encode_failed(*text, e.to_string()).into());
+                            Some(TokenizationError::encode_failed(text, e.to_string()).into());
                         text_has_error = true;
                         all_encodings.push(None);
                     }
@@ -554,7 +555,7 @@ impl ZeroShotModernBertModel {
             .i((.., entailment_id as usize))?
             .to_vec1::<f32>()?;
 
-        let mut results: Vec<Result<Vec<(String, f32)>>> = error_results
+        let mut results: Vec<Result<LabelScores>> = error_results
             .into_iter()
             .map(|e| match e {
                 Some(err) => Err(err),
@@ -568,12 +569,12 @@ impl ZeroShotModernBertModel {
             valid_idx_to_prob.insert(pair_idx, entailment_probs[batch_idx]);
         }
 
-        for text_idx in 0..texts.len() {
-            if results[text_idx].is_err() {
+        for (text_idx, result) in results.iter_mut().enumerate() {
+            if result.is_err() {
                 continue;
             }
 
-            let mut text_results: Vec<(String, f32)> = Vec::with_capacity(num_labels);
+            let mut text_results: LabelScores = Vec::with_capacity(num_labels);
             let mut all_valid = true;
 
             for (label_idx, &label) in candidate_labels.iter().enumerate() {
@@ -589,7 +590,7 @@ impl ZeroShotModernBertModel {
             if all_valid {
                 text_results
                     .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                results[text_idx] = Ok(text_results);
+                *result = Ok(text_results);
             }
         }
 
@@ -617,7 +618,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         self.predict_single_label(tokenizer, text, candidate_labels)
     }
 
@@ -626,7 +627,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<LabelScores>>> {
         let raw_results = self.predict_raw_batch(tokenizer, texts, candidate_labels)?;
 
         Ok(raw_results
@@ -650,7 +651,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         text: &str,
         candidate_labels: &[&str],
-    ) -> Result<Vec<(String, f32)>> {
+    ) -> Result<LabelScores> {
         self.predict_raw(tokenizer, text, candidate_labels)
     }
 
@@ -659,7 +660,7 @@ impl crate::pipelines::zero_shot::model::ZeroShotClassificationModel for ZeroSho
         tokenizer: &Tokenizer,
         texts: &[&str],
         candidate_labels: &[&str],
-    ) -> Result<Vec<Result<Vec<(String, f32)>>>> {
+    ) -> Result<Vec<Result<LabelScores>>> {
         self.predict_raw_batch(tokenizer, texts, candidate_labels)
     }
 
@@ -716,7 +717,7 @@ impl SentimentModernBertModel {
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| GenerationError::UnknownLabelId {
+            .ok_or(GenerationError::UnknownLabelId {
                 id: pred_id as i64,
                 available: available_labels,
             })?
@@ -765,7 +766,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
         let label = self
             .id2label
             .get(&pred_id.to_string())
-            .ok_or_else(|| GenerationError::UnknownLabelId {
+            .ok_or(GenerationError::UnknownLabelId {
                 id: pred_id as i64,
                 available: available_labels,
             })?
@@ -799,7 +800,7 @@ impl crate::pipelines::sentiment::model::SentimentAnalysisModel for SentimentMod
                 Ok(encoding) => encodings.push(Some(encoding)),
                 Err(e) => {
                     error_results[i] =
-                        Some(TokenizationError::encode_failed(*text, e.to_string()).into());
+                        Some(TokenizationError::encode_failed(text, e.to_string()).into());
                     encodings.push(None);
                 }
             }

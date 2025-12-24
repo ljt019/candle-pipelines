@@ -8,4 +8,5 @@ pub(crate) mod pipeline;
 
 pub use crate::models::ModernBertSize;
 pub use builder::ZeroShotClassificationPipelineBuilder;
+pub use model::LabelScores;
 pub use pipeline::ZeroShotClassificationPipeline;

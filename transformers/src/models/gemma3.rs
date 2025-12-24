@@ -272,7 +272,7 @@ impl Context {
         } else {
             input.clone()
         };
-        let seq_len = input.dim(1)? as usize;
+        let seq_len = input.dim(1)?;
         let logits = self.weights.forward(&input, self.position)?;
         self.position += seq_len;
         Ok(logits)

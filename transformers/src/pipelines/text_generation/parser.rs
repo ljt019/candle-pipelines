@@ -114,13 +114,6 @@ impl Event {
         }
     }
 
-    pub(crate) fn tag_handle(&self) -> Option<&Tag> {
-        match self {
-            Self::Tagged { tag, .. } => Some(tag),
-            Self::Output { .. } => None,
-        }
-    }
-
     pub fn part(&self) -> TagParts {
         match self {
             Self::Tagged { part, .. } | Self::Output { part, .. } => *part,
@@ -244,32 +237,29 @@ impl XmlParser {
                     }
                     state.emitted_top_len = current_len;
                 }
-            } else {
-                if let Some((tag_name_ref, content_ref)) = state.open_tags.last() {
-                    let tag_name = tag_name_ref.clone();
-                    let content = content_ref.clone();
-                    let total_len = content.len();
+            } else if let Some((tag_name_ref, content_ref)) = state.open_tags.last() {
+                let tag_name = tag_name_ref.clone();
+                let content = content_ref.clone();
+                let total_len = content.len();
 
-                    let already_emitted = *state.emitted_tag_lens.get(&tag_name).unwrap_or(&0);
+                let already_emitted = *state.emitted_tag_lens.get(&tag_name).unwrap_or(&0);
 
-                    if total_len > already_emitted {
-                        let new_slice = &content[already_emitted..];
+                if total_len > already_emitted {
+                    let new_slice = &content[already_emitted..];
 
-                        if already_emitted == 0 {
-                            let trimmed = new_slice.trim_start_matches('\n');
-                            if !trimmed.is_empty() {
-                                if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                                    events
-                                        .push(Event::tagged_internal(tag_handle.clone(), trimmed));
-                                }
-                            }
-                            state.emitted_tag_lens.insert(tag_name.clone(), total_len);
-                        } else {
+                    if already_emitted == 0 {
+                        let trimmed = new_slice.trim_start_matches('\n');
+                        if !trimmed.is_empty() {
                             if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                                events.push(Event::tagged_internal(tag_handle.clone(), new_slice));
+                                events.push(Event::tagged_internal(tag_handle.clone(), trimmed));
                             }
-                            state.emitted_tag_lens.insert(tag_name.clone(), total_len);
                         }
+                        state.emitted_tag_lens.insert(tag_name.clone(), total_len);
+                    } else if let Some(tag_handle) = self.tag_map.get(&tag_name) {
+                        events.push(Event::tagged_internal(tag_handle.clone(), new_slice));
+                        state.emitted_tag_lens.insert(tag_name.clone(), total_len);
+                    } else {
+                        state.emitted_tag_lens.insert(tag_name.clone(), total_len);
                     }
                 }
             }
@@ -495,7 +485,7 @@ mod tests {
     #[test]
     fn test_basic_parsing() {
         let mut builder = XmlParserBuilder::new();
-        let think_tag = builder.register_tag("think");
+        builder.register_tag("think");
         let parser = builder.build();
 
         let text = "<think>Hello world</think>Regular content";
@@ -503,23 +493,23 @@ mod tests {
 
         assert_eq!(events.len(), 6);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), Some(&think_tag));
+        assert_eq!(events[0].tag(), Some("think"));
         assert_eq!(events[1].part(), TagParts::Content);
         assert_eq!(events[1].get_content(), "Hello world\n");
         assert_eq!(events[2].part(), TagParts::End);
-        assert_eq!(events[2].tag_handle(), Some(&think_tag));
+        assert_eq!(events[2].tag(), Some("think"));
         assert_eq!(events[3].part(), TagParts::Start);
-        assert_eq!(events[3].tag_handle(), None);
+        assert_eq!(events[3].tag(), None);
         assert_eq!(events[4].part(), TagParts::Content);
         assert_eq!(events[4].get_content(), "Regular content\n");
         assert_eq!(events[5].part(), TagParts::End);
-        assert_eq!(events[5].tag_handle(), None);
+        assert_eq!(events[5].tag(), None);
     }
 
     #[test]
     fn test_unregistered_tags() {
         let mut builder = XmlParserBuilder::new();
-        let think_tag = builder.register_tag("think");
+        builder.register_tag("think");
         let parser = builder.build();
 
         let text = "<think>Registered</think><other>Not registered</other>";
@@ -527,23 +517,23 @@ mod tests {
 
         assert_eq!(events.len(), 6);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), Some(&think_tag));
+        assert_eq!(events[0].tag(), Some("think"));
         assert_eq!(events[1].part(), TagParts::Content);
         assert_eq!(events[1].get_content(), "Registered\n");
         assert_eq!(events[2].part(), TagParts::End);
-        assert_eq!(events[2].tag_handle(), Some(&think_tag));
+        assert_eq!(events[2].tag(), Some("think"));
         assert_eq!(events[3].part(), TagParts::Start);
-        assert_eq!(events[3].tag_handle(), None);
+        assert_eq!(events[3].tag(), None);
         assert_eq!(events[4].part(), TagParts::Content);
         assert_eq!(events[4].get_content(), "<other>Not registered</other>\n");
         assert_eq!(events[5].part(), TagParts::End);
-        assert_eq!(events[5].tag_handle(), None);
+        assert_eq!(events[5].tag(), None);
     }
 
     #[test]
     fn test_malformed_xml() {
         let mut builder = XmlParserBuilder::new();
-        let think_tag = builder.register_tag("think");
+        builder.register_tag("think");
         let parser = builder.build();
 
         let text = "<think>Unclosed tag content";
@@ -551,11 +541,11 @@ mod tests {
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), Some(&think_tag));
+        assert_eq!(events[0].tag(), Some("think"));
         assert_eq!(events[1].part(), TagParts::Content);
         assert_eq!(events[1].get_content(), "Unclosed tag content\n");
         assert_eq!(events[2].part(), TagParts::End);
-        assert_eq!(events[2].tag_handle(), Some(&think_tag));
+        assert_eq!(events[2].tag(), Some("think"));
     }
 
     #[test]
@@ -569,17 +559,17 @@ mod tests {
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), None);
+        assert_eq!(events[0].tag(), None);
         assert_eq!(events[1].part(), TagParts::Content);
         assert_eq!(events[1].get_content(), "Hello\n");
         assert_eq!(events[2].part(), TagParts::End);
-        assert_eq!(events[2].tag_handle(), None);
+        assert_eq!(events[2].tag(), None);
     }
 
     #[test]
     fn test_tag_with_attributes() {
         let mut builder = XmlParserBuilder::new();
-        let think_tag = builder.register_tag("think");
+        builder.register_tag("think");
         let parser = builder.build();
 
         let text = "<think answer=\"yes\">Content</think>";
@@ -587,18 +577,18 @@ mod tests {
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), Some(&think_tag));
+        assert_eq!(events[0].tag(), Some("think"));
         assert_eq!(events[1].part(), TagParts::Content);
         assert_eq!(events[1].get_content(), "Content\n");
         assert_eq!(events[2].part(), TagParts::End);
-        assert_eq!(events[2].tag_handle(), Some(&think_tag));
+        assert_eq!(events[2].tag(), Some("think"));
     }
 
     #[test]
     fn test_nested_registered_tags() {
         let mut builder = XmlParserBuilder::new();
-        let outer = builder.register_tag("think");
-        let inner = builder.register_tag("inner");
+        builder.register_tag("think");
+        builder.register_tag("inner");
         let parser = builder.build();
 
         let text = "<think>hi<inner>there</inner>end</think>";
@@ -606,19 +596,19 @@ mod tests {
 
         assert_eq!(events.len(), 6);
         assert_eq!(events[0].part(), TagParts::Start);
-        assert_eq!(events[0].tag_handle(), Some(&outer));
+        assert_eq!(events[0].tag(), Some("think"));
         assert_eq!(events[1].part(), TagParts::Start);
-        assert_eq!(events[1].tag_handle(), Some(&inner));
+        assert_eq!(events[1].tag(), Some("inner"));
         assert_eq!(events[2].part(), TagParts::Content);
-        assert_eq!(events[2].tag_handle(), Some(&inner));
+        assert_eq!(events[2].tag(), Some("inner"));
         assert_eq!(events[2].get_content(), "there\n");
         assert_eq!(events[3].part(), TagParts::End);
-        assert_eq!(events[3].tag_handle(), Some(&inner));
+        assert_eq!(events[3].tag(), Some("inner"));
         assert_eq!(events[4].part(), TagParts::Content);
-        assert_eq!(events[4].tag_handle(), Some(&outer));
+        assert_eq!(events[4].tag(), Some("think"));
         assert_eq!(events[4].get_content(), "hiend\n");
         assert_eq!(events[5].part(), TagParts::End);
-        assert_eq!(events[5].tag_handle(), Some(&outer));
+        assert_eq!(events[5].tag(), Some("think"));
     }
 
     #[test]
