@@ -12,7 +12,7 @@ pub struct GenerationStats {
 }
 
 impl GenerationStats {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tokens_generated: 0,
             time_to_first_token: Duration::default(),

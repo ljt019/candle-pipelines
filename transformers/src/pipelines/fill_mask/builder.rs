@@ -1,15 +1,15 @@
 use super::model::FillMaskModel;
 use super::pipeline::FillMaskPipeline;
+use crate::error::Result;
 use crate::pipelines::cache::ModelOptions;
 use crate::pipelines::utils::{BasePipelineBuilder, DeviceRequest, StandardPipelineBuilder};
-use crate::error::Result;
 
 crate::pipelines::utils::impl_device_methods!(delegated: FillMaskPipelineBuilder<M: FillMaskModel>);
 
 pub struct FillMaskPipelineBuilder<M: FillMaskModel>(StandardPipelineBuilder<M::Options>);
 
 impl<M: FillMaskModel> FillMaskPipelineBuilder<M> {
-    pub fn new(options: M::Options) -> Self {
+    pub(crate) fn new(options: M::Options) -> Self {
         Self(StandardPipelineBuilder::new(options))
     }
 
@@ -21,7 +21,6 @@ impl<M: FillMaskModel> FillMaskPipelineBuilder<M> {
         BasePipelineBuilder::build(self)
     }
 }
-
 
 impl<M: FillMaskModel> BasePipelineBuilder<M> for FillMaskPipelineBuilder<M>
 where

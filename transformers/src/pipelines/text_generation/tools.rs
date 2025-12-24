@@ -49,6 +49,8 @@ impl Clone for Tool {
 }
 
 impl Tool {
+    /// Creates a new Tool. This is primarily used by the `#[tool]` macro.
+    #[doc(hidden)]
     pub fn new(
         name: String,
         description: String,
@@ -69,7 +71,7 @@ impl Tool {
         &self.name
     }
 
-    pub async fn call(&self, parameters: serde_json::Value) -> Result<String> {
+    pub(crate) async fn call(&self, parameters: serde_json::Value) -> Result<String> {
         self.validate(&parameters)?;
         (self.function)(parameters).await
     }
@@ -82,11 +84,11 @@ impl Tool {
         &self.description
     }
 
-    pub fn max_retries(&self) -> u32 {
+    pub(crate) fn max_retries(&self) -> u32 {
         self.max_retries
     }
 
-    pub fn validate(&self, params: &serde_json::Value) -> Result<()> {
+    fn validate(&self, params: &serde_json::Value) -> Result<()> {
         let schema = serde_json::to_value(&self.schema).map_err(|e| ToolError::SchemaError {
             name: self.name.clone(),
             reason: format!("schema serialization failed: {e}"),

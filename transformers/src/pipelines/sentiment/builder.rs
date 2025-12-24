@@ -1,8 +1,8 @@
 use super::model::SentimentAnalysisModel;
 use super::pipeline::SentimentAnalysisPipeline;
+use crate::error::Result;
 use crate::pipelines::cache::ModelOptions;
 use crate::pipelines::utils::{BasePipelineBuilder, DeviceRequest, StandardPipelineBuilder};
-use crate::error::Result;
 
 crate::pipelines::utils::impl_device_methods!(delegated: SentimentAnalysisPipelineBuilder<M: SentimentAnalysisModel>);
 
@@ -11,7 +11,7 @@ pub struct SentimentAnalysisPipelineBuilder<M: SentimentAnalysisModel>(
 );
 
 impl<M: SentimentAnalysisModel> SentimentAnalysisPipelineBuilder<M> {
-    pub fn new(options: M::Options) -> Self {
+    pub(crate) fn new(options: M::Options) -> Self {
         Self(StandardPipelineBuilder::new(options))
     }
 
@@ -23,7 +23,6 @@ impl<M: SentimentAnalysisModel> SentimentAnalysisPipelineBuilder<M> {
         BasePipelineBuilder::build(self)
     }
 }
-
 
 impl<M: SentimentAnalysisModel> BasePipelineBuilder<M> for SentimentAnalysisPipelineBuilder<M>
 where

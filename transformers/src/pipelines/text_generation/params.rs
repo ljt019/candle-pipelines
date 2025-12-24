@@ -31,7 +31,7 @@ impl Default for GenerationParams {
 }
 
 impl GenerationParams {
-    pub fn sampling_strategy(&self) -> Sampling {
+    pub(crate) fn sampling_strategy(&self) -> Sampling {
         if self.temperature <= 0.0 {
             return Sampling::ArgMax;
         }

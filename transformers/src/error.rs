@@ -90,7 +90,7 @@ pub enum TokenizationError {
 }
 
 impl TokenizationError {
-    pub fn encode_failed(input: &str, reason: impl Into<String>) -> Self {
+    pub(crate) fn encode_failed(input: &str, reason: impl Into<String>) -> Self {
         let preview: String = input.chars().take(50).collect();
         Self::EncodeFailed {
             input_preview: preview,

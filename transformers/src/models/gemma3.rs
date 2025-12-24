@@ -25,7 +25,7 @@ pub enum Gemma3Size {
 }
 
 impl Gemma3Size {
-    pub fn weight_repo_id(&self) -> &str {
+    pub(crate) fn weight_repo_id(&self) -> &str {
         match self {
             Gemma3Size::Size1B => "unsloth/gemma-3-1b-it-GGUF",
             Gemma3Size::Size4B => "unsloth/gemma-3-4b-it-GGUF",
@@ -34,7 +34,7 @@ impl Gemma3Size {
         }
     }
 
-    pub fn weight_filename(&self) -> &str {
+    pub(crate) fn weight_filename(&self) -> &str {
         match self {
             Gemma3Size::Size1B => "gemma-3-1b-it-Q4_K_M.gguf",
             Gemma3Size::Size4B => "gemma-3-4b-it-Q4_K_M.gguf",
@@ -43,7 +43,7 @@ impl Gemma3Size {
         }
     }
 
-    pub fn config_repo_id(&self) -> &str {
+    pub(crate) fn config_repo_id(&self) -> &str {
         match self {
             Gemma3Size::Size1B => "google/gemma-3-1b-it",
             Gemma3Size::Size4B => "google/gemma-3-4b-it",

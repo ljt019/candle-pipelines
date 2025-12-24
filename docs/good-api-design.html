@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Elegant Library APIs in Rust - Pascal’s Scribbles</title>
+  <meta property="og:title" content="Elegant Library APIs in Rust" />
+  <meta name="description" content="The existence of libraries with nice, user-friendly interfaces is one of the most important factors when choosing a programming language. Here are some tips on how to write libraries with nice APIs in Rust. (Many of the points also apply to other languages.)" />
+    <meta property="og:description" content="The existence of libraries with nice, user-friendly interfaces is one of the most important factors when choosing a programming language. Here are some tips on how to write libraries with nice APIs in Rust. (Many of the points also apply to other languages.)" />
+  <link rel="canonical" href="https://deterministic.space/elegant-apis-in-rust.html" />
+    <meta property="og:url" content="https://deterministic.space/elegant-apis-in-rust.html" />
+    <meta property="og:site_name" content="Pascal’s Scribbles" />
+  <meta property="og:type" content="article" />
+    <meta property="article:published_time" content="2016-07-21T00:00:00+02:00" />
+  
+
+  <style type="text/css">
+    /* hack.css, MIT license, (c) 2016 EGOIST */
+    html{font-size:14px}*{box-sizing:border-box;text-rendering:geometricPrecision}body{font-size:1rem;line-height:1.5rem;margin:0;font-family:Menlo,Monaco,"Droid Sans","Lucida Console","Liberation Mono","DejaVu Sans Mono","Bitstream Vera Sans Mono","Courier New",monospace,serif;color:#212121}fieldset{border:none;padding:0;margin:0}pre{padding:2rem;margin:1.75rem 0;background-color:white;border:1px solid #ccc;overflow:auto}pre code,code[class*="language-"],pre[class*="language-"]{font-weight:100;text-shadow:none;margin:1.75rem 0}a{cursor:pointer;color:#FF2E88;text-decoration:none;border-bottom:1px solid #FF2E88}a:hover{background-color:#FF2E88;color:white}.grid{display:flex}.grid.\-top{align-items:flex-start}.grid.\-middle{align-items:center}.grid.\-bottom{align-items:flex-end}.grid.\-stretch{align-items:stretch}.grid.\-baseline{align-items:baseline}.grid.\-left{justify-content:flex-start}.grid.\-center{justify-content:center}.grid.\-right{justify-content:flex-end}.grid.\-between{justify-content:space-between}.grid.\-around{justify-content:space-around}.cell{flex:1;box-sizing:border-box}.cell.\-1of12{flex:0 0 calc(100% * 1 / 12)}.cell.\-2of12{flex:0 0 calc(100% * 2 / 12)}.cell.\-3of12{flex:0 0 calc(100% * 3 / 12)}.cell.\-4of12{flex:0 0 calc(100% * 4 / 12)}.cell.\-5of12{flex:0 0 calc(100% * 5 / 12)}.cell.\-6of12{flex:0 0 calc(100% * 6 / 12)}.cell.\-7of12{flex:0 0 calc(100% * 7 / 12)}.cell.\-8of12{flex:0 0 calc(100% * 8 / 12)}.cell.\-9of12{flex:0 0 calc(100% * 9 / 12)}.cell.\-10of12{flex:0 0 calc(100% * 10 / 12)}.cell.\-11of12{flex:0 0 calc(100% * 11 / 12)}@media (max-width: 768px){.grid{flex-direction:column}.cell{flex:0 0 auto}}.hack{word-wrap:break-word}.hack,.hack h1,.hack h2,.hack h3,.hack h4,.hack h5,.hack h6,.hack code,.hack blockquote,.hack em,.hack strong,.hack code{font-size:1rem;line-height:1.5rem;font-style:normal;font-family:Menlo,Monaco,"Droid Sans","Lucida Console","Liberation Mono","DejaVu Sans Mono","Bitstream Vera Sans Mono","Courier New",monospace,serif}.hack h1,.hack h2,.hack h3,.hack h4,.hack h5,.hack h6,.hack code,.hack blockquote,.hack ol,.hack ul,.hack dl,.hack li,.hack p,.hack section,.hack header,.hack footer{float:none;margin:0;padding:0}.hack h1,.hack p,.hack ul,.hack dl,.hack ol,.hack blockquote{margin-top:1.5rem;margin-bottom:1.5rem}.hack h1{position:relative;display:inline-block;display:table-cell;padding:1.5rem 0 3rem;margin:0;overflow:hidden}.hack h1:after{content:"====================================================================================================";position:absolute;bottom:1.2rem;left:0}.hack h1+*{margin-top:0}.hack h2,.hack h3,.hack h4,.hack h5,.hack h6{position:relative;margin-bottom:1.5rem}.hack h1,.hack h2{line-height:1.5rem}.hack h2:before,.hack h3:before,.hack h4:before,.hack h5:before,.hack h6:before{display:inline}@media screen and (min-width: 66rem){.hack h2:before,.hack h3:before,.hack h4:before,.hack h5:before,.hack h6:before{display:block;position:absolute;transform:translateX(-100%);padding-right:0.6rem}}.hack h2:before{content:"## "}.hack h3:before{content:"### "}.hack h4:before{content:"#### "}.hack h5:before{content:"##### "}.hack h6:before{content:"###### "}.hack li{position:relative;display:block;padding-left:1.5rem}.hack li:before{position:absolute;top:0;left:0}.hack ul>li:before{content:"-"}.hack ol{counter-reset:ol}.hack ol>li:before{content:counter(ol) ".";counter-increment:ol}.hack blockquote{position:relative;padding-left:17px;padding-left:2ch;overflow:hidden}.hack blockquote:after{content:">\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>\A>";white-space:pre;position:absolute;top:0;left:0;line-height:1.5rem}.hack em:before,.hack em:after{content:"*";display:inline}.hack pre code:before,.hack pre code:after{content:''}.hack code{color:#616161;font-weight:bold}.hack a code{color:#FF2E88}.hack a:hover code{color:white}.hack code:before,.hack code:after{content:"`";display:inline}.hack hr{position:relative;height:1.5rem;font-size:0;line-height:0;overflow:hidden;border:0;margin-bottom:1.5rem}.hack hr:after{content:"- - -";position:absolute;top:0;left:0;font-size:1rem;line-height:1.5rem;width:100%;word-wrap:break-word;color:#9e9e9e}@-moz-document url-prefix(){.hack h1{display:block}}.hack-ones ol>li:after{content:"1."}p{margin:0 0 1.75rem}.container{max-width:60rem;margin:0 auto;padding:0 1rem}.container-fluid{margin:0 auto;padding:0 1rem}.inner{padding:1rem}.inner2x{padding:2rem}.pull-left{float:left}.pull-right{float:right}@media screen and (max-width: 768px){.form-group label{display:block;border-bottom:none;width:100%}.form-group.form-textarea label:after{display:none}.form-control{width:100%}textarea.form-control{border-left:none;padding:.5rem 0}pre::-webkit-scrollbar{height:3px}}@media screen and (max-width: 480px){.form{width:100%}}table{width:100%;display:block;overflow-x:scroll;border-collapse:collapse;margin:1.5rem 0}table td,table th{vertical-align:top;border:1px solid #e0e0e0;line-height:1.5rem;padding:.75rem;padding:calc(.75rem - 1px) .75rem}table thead th,table tfoot td{font-weight:bold}table tfoot tr:first-child td{border-top-width:2px;padding-top:calc(.75rem - 2px)}.highlight .hll{background-color:#ffc}.highlight .c{color:#999988;font-style:italic}.highlight .err{color:#a61717;background-color:#e3d2d2}.highlight .k{color:#000000;font-weight:bold}.highlight .o{color:#000000;font-weight:bold}.highlight .cm{color:#999988;font-style:italic}.highlight .cp{color:#999999;font-weight:bold;font-style:italic}.highlight .c1{color:#999988;font-style:italic}.highlight .cs{color:#999999;font-weight:bold;font-style:italic}.highlight .gd{color:#000000;background-color:#fdd}.highlight .ge{color:#000000;font-style:italic}.highlight .gr{color:#a00}.highlight .gh{color:#999}.highlight .gi{color:#000000;background-color:#dfd}.highlight .go{color:#888}.highlight .gp{color:#555}.highlight .gs{font-weight:bold}.highlight .gu{color:#aaa}.highlight .gt{color:#a00}.highlight .kc{color:#000000;font-weight:bold}.highlight .kd{color:#000000;font-weight:bold}.highlight .kn{color:#000000;font-weight:bold}.highlight .kp{color:#000000;font-weight:bold}.highlight .kr{color:#000000;font-weight:bold}.highlight .kt{color:#445588;font-weight:bold}.highlight .m{color:#099}.highlight .s{color:#d01040}.highlight .na{color:teal}.highlight .nb{color:#0086B3}.highlight .nc{color:#445588;font-weight:bold}.highlight .no{color:teal}.highlight .nd{color:#3c5d5d;font-weight:bold}.highlight .ni{color:purple}.highlight .ne{color:#990000;font-weight:bold}.highlight .nf{color:#990000;font-weight:bold}.highlight .nl{color:#990000;font-weight:bold}.highlight .nn{color:#555}.highlight .nt{color:navy}.highlight .nv{color:teal}.highlight .ow{color:#000000;font-weight:bold}.highlight .w{color:#bbb}.highlight .mf{color:#099}.highlight .mh{color:#099}.highlight .mi{color:#099}.highlight .mo{color:#099}.highlight .sb{color:#d01040}.highlight .sc{color:#d01040}.highlight .sd{color:#d01040}.highlight .s2{color:#d01040}.highlight .se{color:#d01040}.highlight .sh{color:#d01040}.highlight .si{color:#d01040}.highlight .sx{color:#d01040}.highlight .sr{color:#009926}.highlight .s1{color:#d01040}.highlight .ss{color:#990073}.highlight .bp{color:#999}.highlight .vc{color:teal}.highlight .vg{color:teal}.highlight .vi{color:teal}.highlight .il{color:#099}@media print{html{font-size:9pt}h1,h2,h3,h4,h5{page-break-after:avoid}figure,img,ol,table,ul{page-break-inside:avoid}img{max-width:100% !important}@page{margin:2cm}}footer.site-footer{margin-top:3rem;border-top:2px solid #bdbdbd;padding-top:2rem}footer.article-footer{margin:4rem 0 2rem}.post-content{margin:3rem 0}.post-content{-webkit-hyphens:auto}code{-webkit-hyphens:none}.highlight code{font-weight:normal}.hack ul ul,.hack ul ol,.hack ol ul,.hack ol ol{margin-top:0;margin-bottom:0}.hack blockquote :first-child{margin-top:0}.hack blockquote :last-child{margin-bottom:0}.hack sup[id^="fnref"]{font-size:1rem;vertical-align:baseline}.hack sup[id^="fnref"]:before{content:"[^";color:#757575}.hack sup[id^="fnref"]:after{content:"]";color:#757575}.hack .footnotes{color:#757575}.hack .footnotes:before{content:"___";display:block}.hack dt{font-weight:bold}.hack dd{margin-left:0;padding-left:1.5rem;position:relative}.hack dd:before{content:":";position:absolute;left:0;top:0}.highlight .k{color:#757575}.highlight .nd{font-weight:normal}.highlight .n{color:#212121}.language-rust .highlight .err,.language-rust .highlight .err+.n{color:#000080;background-color:transparent;font-weight:normal}
+
+  </style>
+</head>
+<body>
+  <div class="hack container">
+    <article class="post" itemscope itemtype="http://schema.org/BlogPosting">
+  <header class="post-header">
+    <h1 class="post-title" itemprop="name headline">Elegant Library APIs in Rust</h1>
+    <p class="post-meta">
+      Created <time datetime="2016-07-21T00:00:00+02:00" itemprop="datePublished">Jul 21, 2016</time>
+       by <span itemprop="author" itemscope itemtype="http://schema.org/Person"><span itemprop="name">Pascal Hertleif</span></span>
+      and published in <a href="https://deterministic.space">Pascal's Scribbles</a>.
+      
+        Labeled as <em>rust</em>, <em>writing</em> and <em>incomplete</em>.
+      
+    </p>
+  </header>
+
+  <div class="post-content" itemprop="articleBody">
+    <p>The existence of libraries with nice, user-friendly interfaces is one of the most important factors when choosing a programming language. Here are some tips on how to write libraries with nice APIs in Rust. (Many of the points also apply to other languages.)</p>
+
+<p><a href="https://www.youtube.com/watch?v=0zOg8_B71gE">You can also watch my talk at Rustfest 2017 about this!</a></p>
+
+<p><strong>Update 2017-04-27:</strong> Since writing that post,
+<a href="https://github.com/brson">@brson</a> of the Rust Libs Team has published a pretty comprehensive
+<a href="https://rust-lang.github.io/api-guidelines/">Rust API Guidelines</a>
+document that includes my advice here and a lot more.</p>
+
+<p><strong>Update 2020-06-01:</strong> This post is quite a few years old by now!
+Most of the patterns are still valid and actively used in Rust today,
+but the language has also evolved quite a bit and enabled new patterns
+that are not discussed here.
+I’ve updated some of syntax and crate recommendations
+but otherwise kept the post as it was in 2016.</p>
+
+<h2 class="no_toc" id="contents">Contents</h2>
+
+<ul id="markdown-toc">
+  <li><a href="#what-makes-an-api-elegant" id="markdown-toc-what-makes-an-api-elegant">What makes an API elegant?</a></li>
+  <li><a href="#techniques" id="markdown-toc-techniques">Techniques</a>    <ul>
+      <li><a href="#consistent-names" id="markdown-toc-consistent-names">Consistent names</a>        <ul>
+          <li><a href="#more-method-name-conventions" id="markdown-toc-more-method-name-conventions">More method name conventions</a></li>
+        </ul>
+      </li>
+      <li><a href="#doc-tests" id="markdown-toc-doc-tests">Doc tests</a></li>
+      <li><a href="#dont-stringly-type-your-api" id="markdown-toc-dont-stringly-type-your-api">Don’t “stringly type” your API</a>        <ul>
+          <li><a href="#a-module-full-of-constants" id="markdown-toc-a-module-full-of-constants">A module full of constants</a></li>
+          <li><a href="#actually-parsing-a-string-with-fromstr" id="markdown-toc-actually-parsing-a-string-with-fromstr">Actually parsing a string with <code class="language-plaintext highlighter-rouge">FromStr</code></a></li>
+        </ul>
+      </li>
+      <li><a href="#error-handling" id="markdown-toc-error-handling">Error handling</a></li>
+      <li><a href="#public-type-aliases" id="markdown-toc-public-type-aliases">Public type aliases</a></li>
+      <li><a href="#use-conversion-traits" id="markdown-toc-use-conversion-traits">Use conversion traits</a>        <ul>
+          <li><a href="#cow" id="markdown-toc-cow">Cow</a></li>
+          <li><a href="#example-stdconvertinto" id="markdown-toc-example-stdconvertinto">Example: <code class="language-plaintext highlighter-rouge">std::convert::Into</code></a></li>
+          <li><a href="#intooption_" id="markdown-toc-intooption_"><code class="language-plaintext highlighter-rouge">Into&lt;Option&lt;_&gt;&gt;</code></a></li>
+          <li><a href="#a-note-on-possibly-long-compile-times" id="markdown-toc-a-note-on-possibly-long-compile-times">A note on possibly long compile times</a></li>
+        </ul>
+      </li>
+      <li><a href="#laziness" id="markdown-toc-laziness">Laziness</a>        <ul>
+          <li><a href="#use-iterators" id="markdown-toc-use-iterators">Use Iterators</a>            <ul>
+              <li><a href="#iterators-as-parameters" id="markdown-toc-iterators-as-parameters">Iterators as parameters</a></li>
+              <li><a href="#returningimplementing-iterators" id="markdown-toc-returningimplementing-iterators">Returning/implementing iterators</a></li>
+              <li><a href="#iterator-like-traits" id="markdown-toc-iterator-like-traits"><code class="language-plaintext highlighter-rouge">Iterator</code>-like traits</a></li>
+            </ul>
+          </li>
+          <li><a href="#take-closures" id="markdown-toc-take-closures">Take closures</a></li>
+          <li><a href="#lazy-tricks" id="markdown-toc-lazy-tricks">Lazy tricks</a></li>
+        </ul>
+      </li>
+      <li><a href="#convenience-traits" id="markdown-toc-convenience-traits">Convenience traits</a></li>
+      <li><a href="#custom-traits-for-input-parameters" id="markdown-toc-custom-traits-for-input-parameters">Custom traits for input parameters</a>        <ul>
+          <li><a href="#example-strfind" id="markdown-toc-example-strfind">Example: <code class="language-plaintext highlighter-rouge">str::find</code></a></li>
+        </ul>
+      </li>
+      <li><a href="#extension-traits" id="markdown-toc-extension-traits">Extension traits</a>        <ul>
+          <li><a href="#decorating-results" id="markdown-toc-decorating-results">Decorating results</a></li>
+          <li><a href="#extending-traits" id="markdown-toc-extending-traits">Extending traits</a></li>
+        </ul>
+      </li>
+      <li><a href="#builder-pattern" id="markdown-toc-builder-pattern">Builder pattern</a>        <ul>
+          <li><a href="#example-stdfsopenoptions" id="markdown-toc-example-stdfsopenoptions">Example: <code class="language-plaintext highlighter-rouge">std::fs::OpenOptions</code></a></li>
+        </ul>
+      </li>
+      <li><a href="#session-types" id="markdown-toc-session-types">Session types</a></li>
+      <li><a href="#use-lifetimes-well" id="markdown-toc-use-lifetimes-well">Use lifetimes well</a>        <ul>
+          <li><a href="#put-finalizer-code-in-drop" id="markdown-toc-put-finalizer-code-in-drop">Put finalizer code in <code class="language-plaintext highlighter-rouge">drop</code></a></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><a href="#case-studies" id="markdown-toc-case-studies">Case Studies</a></li>
+  <li><a href="#other-design-patterns" id="markdown-toc-other-design-patterns">Other design patterns</a></li>
+</ul>
+
+<h2 id="what-makes-an-api-elegant">What makes an API elegant?</h2>
+
+<ul>
+  <li>Code using the API is easily readable thanks to obvious, self-explanatory method names.</li>
+  <li>Guessable method names also help when using the API, so there is less need to read documentation.</li>
+  <li>Everything has at least some documentation and a small code example.</li>
+  <li>Users of the API need to write little boilerplate code to use it, as
+    <ul>
+      <li>methods accept a wide range of valid input types (where conversions are obvious), and</li>
+      <li>shortcuts to get the ‘usual’ stuff done quickly are available.</li>
+    </ul>
+  </li>
+  <li>Types are cleverly used to prevent logic errors, but don’t get in your way too much.</li>
+  <li>Returned errors are useful, and panic cases are clearly documented.</li>
+</ul>
+
+<h2 id="techniques">Techniques</h2>
+
+<h3 id="consistent-names">Consistent names</h3>
+
+<p>There are a few Rust RFCs that describe the naming scheme of the standard library. You should follow them to make your library’s API feel familiar for users.</p>
+
+<ul>
+  <li><a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0199-ownership-variants.md">RFC 199</a> explains that you should use <code class="language-plaintext highlighter-rouge">mut</code>, <code class="language-plaintext highlighter-rouge">move</code>, or <code class="language-plaintext highlighter-rouge">ref</code> as suffixes to differentiate methods based on the mutability of their parameters.</li>
+  <li><a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0344-conventions-galore.md">RFC 344</a> defines some interesting conventions, like
+    <ul>
+      <li>how to refer to types in method names (e.g., <code class="language-plaintext highlighter-rouge">&amp;mut [T]</code> becomes <code class="language-plaintext highlighter-rouge">mut_slice</code>, and <code class="language-plaintext highlighter-rouge">*mut T</code> becomes <code class="language-plaintext highlighter-rouge">mut_ptr</code>),</li>
+      <li>how to call methods that return iterators,</li>
+      <li>that getters methods should be called <code class="language-plaintext highlighter-rouge">field_name</code> while setter methods should be <code class="language-plaintext highlighter-rouge">set_field_name</code>,</li>
+      <li>and how to name traits: “Prefer (transitive) verbs, nouns, and then adjectives; avoid grammatical suffixes (like able)”, but also “if there is a single method that is the dominant functionality of the trait, consider using the same name for the trait itself”.</li>
+    </ul>
+  </li>
+  <li><a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0430-finalizing-naming-conventions.md">RFC 430</a> describes some general casing conventions (<em>tl;dr</em> <code class="language-plaintext highlighter-rouge">CamelCase</code> for type-level stuff, <code class="language-plaintext highlighter-rouge">snake_case</code> for value-level stuff).</li>
+  <li><a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0445-extension-trait-conventions.md">RFC 445</a> wants you to add an <code class="language-plaintext highlighter-rouge">Ext</code> suffix to extension traits.</li>
+</ul>
+
+<h4 id="more-method-name-conventions">More method name conventions</h4>
+
+<p>In addition to what <a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0199-ownership-variants.md">RFC 199</a> and <a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0344-conventions-galore.md">RFC 344</a> (see above) define, there are a few more conventions around what method names to choose, which seem to not be represented in RFCs (yet). These are mostly documented in the <a href="https://doc.rust-lang.org/1.12.0/style/style/naming/conversions.html">old Rust style guidelines</a> and in <a href="https://twitter.com/llogiq">@llogiq</a>’s post <a href="https://llogiq.github.io/2016/02/11/rustic.html">Rustic Bits</a> as well as <a href="https://github.com/Manishearth/rust-clippy">clippy’s</a> <a href="https://github.com/Manishearth/rust-clippy/blob/55e67bfc105ef6abf0997584e0e84cc939f35dc6/clippy_lints/src/methods.rs#L88-L110"><code class="language-plaintext highlighter-rouge">wrong_self_convention</code></a> lint. Here’s a summary:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Method name</th>
+      <th>Parameters</th>
+      <th>Notes</th>
+      <th>Examples</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">new</code></td>
+      <td>no self, usually ≥ 1<sup id="fnref:new" role="doc-noteref"><a href="#fn:new" class="footnote" rel="footnote">1</a></sup></td>
+      <td>Constructor, also cf. <a href="https://doc.rust-lang.org/std/default/trait.Default.html"><code class="language-plaintext highlighter-rouge">Default</code></a></td>
+      <td><code class="language-plaintext highlighter-rouge">Box::new</code>, <code class="language-plaintext highlighter-rouge">std::net::Ipv4Addr::new</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">with_...</code></td>
+      <td>no self, ≥ 1</td>
+      <td>Alternative constructors</td>
+      <td><code class="language-plaintext highlighter-rouge">Vec::with_capacity</code>, <code class="language-plaintext highlighter-rouge">regex::Regex::with_size_limit</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">from_...</code></td>
+      <td>1</td>
+      <td>cf. <a href="#use-conversion-traits">conversion traits</a></td>
+      <td><code class="language-plaintext highlighter-rouge">String::from_utf8_lossy</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">as_...</code></td>
+      <td><code class="language-plaintext highlighter-rouge">&amp;self</code></td>
+      <td>Free conversion, gives a view into data</td>
+      <td><code class="language-plaintext highlighter-rouge">str::as_bytes</code>, <code class="language-plaintext highlighter-rouge">uuid::Uuid::as_bytes</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">to_...</code></td>
+      <td><code class="language-plaintext highlighter-rouge">&amp;self</code></td>
+      <td>Expensive conversion</td>
+      <td><code class="language-plaintext highlighter-rouge">str::to_string</code>, <code class="language-plaintext highlighter-rouge">std::path::Path::to_str</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">into_...</code></td>
+      <td><code class="language-plaintext highlighter-rouge">self</code> (<em>consumes</em>)</td>
+      <td>Potentially expensive conversion, cf. <a href="#use-conversion-traits">conversion traits</a></td>
+      <td><code class="language-plaintext highlighter-rouge">std::fs::File::into_raw_fd</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">is_...</code></td>
+      <td><code class="language-plaintext highlighter-rouge">&amp;self</code> (or none)</td>
+      <td>Should probably return a <code class="language-plaintext highlighter-rouge">bool</code></td>
+      <td><code class="language-plaintext highlighter-rouge">slice::is_empty</code>, <code class="language-plaintext highlighter-rouge">Result::is_ok</code>, <code class="language-plaintext highlighter-rouge">std::path::Path::is_file</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">has_...</code></td>
+      <td><code class="language-plaintext highlighter-rouge">&amp;self</code> (or none)</td>
+      <td>Should probably return a <code class="language-plaintext highlighter-rouge">bool</code></td>
+      <td><code class="language-plaintext highlighter-rouge">regex_syntax::Expr::has_bytes</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="doc-tests">Doc tests</h3>
+
+<p>Write documentation with example code showing how to use your API and get automatic tests for free – Two birds, one stone. You can read more about in the <a href="https://doc.rust-lang.org/1.12.0/book/documentation.html#documentation-as-tests">documentation chapter</a> of the official book.</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cd">/// Manipulate a number by magic</span>
+<span class="cd">///</span>
+<span class="cd">/// # Examples</span>
+<span class="cd">///</span>
+<span class="cd">/// ```rust</span>
+<span class="cd">/// assert_eq!(min( 0,   14),    0);</span>
+<span class="cd">/// assert_eq!(min( 0, -127), -127);</span>
+<span class="cd">/// assert_eq!(min(42,  666),   42);</span>
+<span class="cd">/// ```</span>
+<span class="k">fn</span> <span class="nf">min</span><span class="p">(</span><span class="n">lhs</span><span class="p">:</span> <span class="nb">i32</span><span class="p">,</span> <span class="n">rhs</span><span class="p">:</span> <span class="nb">i32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">i32</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="n">lhs</span> <span class="o">&lt;</span> <span class="n">rhs</span> <span class="p">{</span> <span class="n">lhs</span> <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="n">rhs</span> <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>To enforce that every public API item is documented, use <code class="language-plaintext highlighter-rouge">#![deny(missing_docs)]</code>. You might also be interested in my post suggesting <a href="/machine-readable-inline-markdown-code-cocumentation.html">conventions for formatting Rust documentation</a>.</p>
+
+<h3 id="dont-stringly-type-your-api">Don’t “stringly type” your API</h3>
+
+<p>Coming from dynamically typed languages, you might be tempted to use strings with specific values in various places.</p>
+
+<p>For example: You want a function to print some input text in a color, so you use a parameter <code class="language-plaintext highlighter-rouge">color</code> of type <code class="language-plaintext highlighter-rouge">&amp;str</code>. That also means you expect your users to write one of the names from a limited number of color names (like <code class="language-plaintext highlighter-rouge">["red", "green", "blue", "light golden rod yellow"]</code>).</p>
+
+<p>This is <strong>not</strong> what you should do in Rust! If you know <em>all</em> possible variants beforehand, use an <code class="language-plaintext highlighter-rouge">enum</code>. This way, you don’t need to parse/pattern match the string – and deal with possible errors – but can be sure that a user of your API can only ever supply valid inputs<sup id="fnref:illegal-states" role="doc-noteref"><a href="#fn:illegal-states" class="footnote" rel="footnote">2</a></sup>.</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">enum</span> <span class="n">Color</span> <span class="p">{</span> <span class="n">Red</span><span class="p">,</span> <span class="n">Green</span><span class="p">,</span> <span class="n">Blue</span><span class="p">,</span> <span class="n">LightGoldenRodYellow</span> <span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">color_me</span><span class="p">(</span><span class="n">input</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">,</span> <span class="n">color</span><span class="p">:</span> <span class="n">Color</span><span class="p">)</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">color_me</span><span class="p">(</span><span class="s">"surprised"</span><span class="p">,</span> <span class="nn">Color</span><span class="p">::</span><span class="n">Blue</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h4 id="a-module-full-of-constants">A module full of constants</h4>
+
+<p>Alternatively, if you have a more complex value you want to express you can define a new <code class="language-plaintext highlighter-rouge">struct</code> and then define a bunch of constants with common values. If you put the constants into a public module, your users can access them using similar syntax as when using an enum variant.</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">mod</span> <span class="n">output_options</span> <span class="p">{</span>
+    <span class="k">pub</span> <span class="k">struct</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+    
+    <span class="k">impl</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="k">fn</span> <span class="nf">new</span><span class="p">(</span><span class="cm">/* ... */</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">}</span> <span class="p">}</span>
+    
+    <span class="k">pub</span> <span class="k">const</span> <span class="n">DEFAULT</span><span class="p">:</span> <span class="n">OutputOptions</span> <span class="o">=</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">};</span>
+    <span class="k">pub</span> <span class="k">const</span> <span class="n">SLIM</span><span class="p">:</span> <span class="n">OutputOptions</span> <span class="o">=</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">};</span>
+    <span class="k">pub</span> <span class="k">const</span> <span class="n">PRETTY</span><span class="p">:</span> <span class="n">OutputOptions</span> <span class="o">=</span> <span class="n">OutputOptions</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">};</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">output</span><span class="p">(</span><span class="n">f</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Foo</span><span class="p">,</span> <span class="n">opts</span><span class="p">:</span> <span class="n">OutputOptions</span><span class="p">)</span> <span class="p">{</span> <span class="cm">/* ... */</span> <span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">foo</span> <span class="o">=</span> <span class="nn">Foo</span><span class="p">::</span><span class="nf">new</span><span class="p">();</span>
+    
+    <span class="nf">output</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="nn">output_options</span><span class="p">::</span><span class="n">PRETTY</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h4 id="actually-parsing-a-string-with-fromstr">Actually parsing a string with <code class="language-plaintext highlighter-rouge">FromStr</code></h4>
+
+<p>There may still be cases where users of your API actually have strings, e.g. from reading environment variables or by taking <em>their</em> user input – i.e., they didn’t write (static) strings themselves in their code to give to your API (which is what we try to prevent). In those cases it makes sense to have a look at what the <a href="https://doc.rust-lang.org/std/str/trait.FromStr.html"><code class="language-plaintext highlighter-rouge">FromStr</code></a> trait can give you, which abstracts over the concept of parsing a string into a Rust data type.</p>
+
+<p>If all you want to do is map a string with an enum variant name to the right enum variant, you can adapt <a href="https://play.rust-lang.org/?gist=c5610c31b8469422e57c23721cba09f8&amp;version=nightly&amp;backtrace=0">this macro</a> (from <a href="https://twitter.com/killercup/status/773432184199847940">this tweet</a>; there might also be a crate for that).</p>
+
+<p>Depending on your API, you could also decide to have your users deal with parsing the string. If you supply the right types and implementations, it shouldn’t be difficult (but needs to be documented nonetheless).</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Option A: You do the parsing</span>
+<span class="k">fn</span> <span class="nf">output_a</span><span class="p">(</span><span class="n">f</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Foo</span><span class="p">,</span> <span class="n">color</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="n">Bar</span><span class="p">,</span> <span class="n">ParseError</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="c1">// This shadows the `options` name with the parsed type</span>
+    <span class="k">let</span> <span class="n">color</span><span class="p">:</span> <span class="n">Color</span> <span class="o">=</span> <span class="n">options</span><span class="nf">.parse</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
+
+    <span class="n">f</span><span class="nf">.to_bar</span><span class="p">(</span><span class="o">&amp;</span><span class="n">color</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// Option B: User does the parsing</span>
+<span class="k">fn</span> <span class="nf">output_b</span><span class="p">(</span><span class="n">f</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Foo</span><span class="p">,</span> <span class="n">color</span><span class="p">:</span> <span class="o">&amp;</span><span class="n">Color</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">Bar</span> <span class="p">{</span>
+    <span class="n">f</span><span class="nf">.to_bar</span><span class="p">(</span><span class="n">color</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">foo</span> <span class="o">=</span> <span class="nn">Foo</span><span class="p">::</span><span class="nf">new</span><span class="p">();</span>
+
+    <span class="c1">// Option A: You do the parsing, user needs to deal with API error</span>
+    <span class="nf">output_a</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="s">"Green"</span><span class="p">)</span><span class="nf">.expect</span><span class="p">(</span><span class="s">"Error :("</span><span class="p">);</span>
+
+    <span class="c1">// Option B: User has correct type, no need to deal with error here</span>
+    <span class="nf">output_b</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="nn">Color</span><span class="p">::</span><span class="n">Green</span><span class="p">);</span>
+
+    <span class="c1">// Option B: User has string, needs to parse and deal with parse error</span>
+    <span class="nf">output_b</span><span class="p">(</span><span class="n">foo</span><span class="p">,</span> <span class="s">"Green"</span><span class="nf">.parse</span><span class="p">()</span><span class="nf">.except</span><span class="p">(</span><span class="s">"Parse error!"</span><span class="p">));</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="error-handling">Error handling</h3>
+
+<p>The official book has an <a href="https://doc.rust-lang.org/1.43.0/book/ch09-02-recoverable-errors-with-result.html">awesome chapter</a> on error handling.</p>
+
+<p>There are a few crates to reduce the boilerplate needed for good error handling,
+e.g., <a href="https://crates.io/crates/anyhow">anyhow</a> (dynamic error type with methods for annotating and chaining errors),
+and <a href="https://crates.io/crates/thiserror">thiserror</a> (makes creating custom error types easy).</p>
+
+<h3 id="public-type-aliases">Public type aliases</h3>
+
+<p>If your internal code uses generic types with the same type parameters over and over again, it makes sense to use a type alias. If you also expose those types to your users, you should expose (and document) the type alias as well.</p>
+
+<p>A common case where this is used is <code class="language-plaintext highlighter-rouge">Result&lt;T, E&gt;</code> types, where the error case (<code class="language-plaintext highlighter-rouge">E</code>) is fixed. For example, <a href="https://doc.rust-lang.org/std/io/type.Result.html"><code class="language-plaintext highlighter-rouge">std::io::Result&lt;T&gt;</code></a> is an alias for <code class="language-plaintext highlighter-rouge">Result&lt;T, std::io::Error&gt;</code>, <a href="https://doc.rust-lang.org/std/fmt/type.Result.html"><code class="language-plaintext highlighter-rouge">std::fmt::Result</code></a> is an alias for <code class="language-plaintext highlighter-rouge">Result&lt;(), std::fmt::Error&gt;</code>, and <a href="https://github.com/serde-rs/json/blob/e5f9ca89c6de1a7bf86aff0283bcd83845b05576/json/src/error.rs#L258"><code class="language-plaintext highlighter-rouge">serde_json::error::Result&lt;T&gt;</code></a> is an alias for <code class="language-plaintext highlighter-rouge">Result&lt;T, serde_json::error::Error&gt;</code>.</p>
+
+<h3 id="use-conversion-traits">Use conversion traits</h3>
+
+<p>It’s good practice to never have <code class="language-plaintext highlighter-rouge">&amp;String</code> or <code class="language-plaintext highlighter-rouge">&amp;Vec&lt;T&gt;</code> as input parameters and instead use <code class="language-plaintext highlighter-rouge">&amp;str</code> and <code class="language-plaintext highlighter-rouge">&amp;[T]</code> as they allow more types to be passed in. (Basically, everything that <code class="language-plaintext highlighter-rouge">deref</code>s to a (string) slice).</p>
+
+<p>We can apply the same idea at a more abstract level: Instead of using concrete types for input parameters, try to use generics with precise constraints. The downside of this is that the documentation will be less readable as it will be full of generics with complex constraints!</p>
+
+<p><a href="https://doc.rust-lang.org/std/convert/index.html"><code class="language-plaintext highlighter-rouge">std::convert</code></a> has some goodies for that:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">AsMut</code>: A cheap, mutable reference-to-mutable reference conversion.</li>
+  <li><code class="language-plaintext highlighter-rouge">AsRef</code>: A cheap, reference-to-reference conversion.</li>
+  <li><code class="language-plaintext highlighter-rouge">From</code>: Construct Self via a conversion.</li>
+  <li><code class="language-plaintext highlighter-rouge">Into</code>: A conversion that consumes self, which may or may not be expensive.</li>
+  <li><code class="language-plaintext highlighter-rouge">TryFrom</code>: Attempt to construct Self via a conversion. (Unstable as of Rust 1.10)</li>
+  <li><code class="language-plaintext highlighter-rouge">TryInto</code>: An attempted conversion that consumes self, which may or may not be expensive. (Unstable as of Rust 1.10)</li>
+</ul>
+
+<p>You might also enjoy <a href="https://ricardomartins.cc/2016/08/03/convenient_and_idiomatic_conversions_in_rust">this article about <em>Convenient and idiomatic conversions in Rust</em></a>.</p>
+
+<h4 id="cow">Cow</h4>
+
+<p>If you are dealing with a lot of things that may or may not need to be allocated, you should also look into <a href="https://doc.rust-lang.org/std/borrow/enum.Cow.html"><code class="language-plaintext highlighter-rouge">Cow&lt;'a, B&gt;</code></a> which allows you to abstract over borrowed and owned data.</p>
+
+<h4 id="example-stdconvertinto">Example: <a href="https://doc.rust-lang.org/std/convert/trait.Into.html"><code class="language-plaintext highlighter-rouge">std::convert::Into</code></a></h4>
+
+<table>
+  <thead>
+    <tr>
+      <th><code class="language-plaintext highlighter-rouge">fn foo(p: PathBuf)</code></th>
+      <th><code class="language-plaintext highlighter-rouge">fn foo&lt;P: Into&lt;PathBuf&gt;&gt;(p: P)</code></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Users needs to convert their data to a <code class="language-plaintext highlighter-rouge">PathBuf</code></td>
+      <td>Library can call <code class="language-plaintext highlighter-rouge">.into()</code> for them</td>
+    </tr>
+    <tr>
+      <td>User does allocation</td>
+      <td>Less obvious: Library might need to do allocation</td>
+    </tr>
+    <tr>
+      <td>User needs to care about what a <code class="language-plaintext highlighter-rouge">PathBuf</code> is and how to get one</td>
+      <td>User can just give a <code class="language-plaintext highlighter-rouge">String</code> or an <code class="language-plaintext highlighter-rouge">OsString</code> or a <code class="language-plaintext highlighter-rouge">PathBuf</code> and be happy</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4 id="intooption_"><code class="language-plaintext highlighter-rouge">Into&lt;Option&lt;_&gt;&gt;</code></h4>
+
+<p><a href="https://github.com/rust-lang/rust/pull/34828">This pull request</a>, which landed in Rust 1.12, adds an <code class="language-plaintext highlighter-rouge">impl&lt;T&gt; From&lt;T&gt; for Option&lt;T&gt;</code>. While only a few lines long this allows you to write APIs that can be called without typing <code class="language-plaintext highlighter-rouge">Some(…)</code> all the time.</p>
+
+<p><a href="https://play.rust-lang.org/?gist=68645e903a2f903cf43d3070d562a809&amp;version=nightly&amp;backtrace=0">Before:</a></p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// Easy for API author, easy to read documentation</span>
+<span class="k">fn</span> <span class="nf">foo</span><span class="p">(</span><span class="n">lorem</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">,</span> <span class="n">ipsum</span><span class="p">:</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;</span><span class="p">,</span> <span class="n">dolor</span><span class="p">:</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;</span><span class="p">,</span> <span class="n">sit</span><span class="p">:</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nd">println!</span><span class="p">(</span><span class="s">"{}"</span><span class="p">,</span> <span class="n">lorem</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">);</span>               <span class="c1">// That looks weird</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="nf">Some</span><span class="p">(</span><span class="mi">42</span><span class="p">),</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">);</span>           <span class="c1">// Okay</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="nf">Some</span><span class="p">(</span><span class="mi">42</span><span class="p">),</span> <span class="nf">Some</span><span class="p">(</span><span class="mi">1337</span><span class="p">),</span> <span class="nf">Some</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">));</span> <span class="c1">// Halp! Too… much… Some…!</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p><a href="https://play.rust-lang.org/?gist=23b98645fa7fd68cb9e28da9425a62f9&amp;version=nightly&amp;backtrace=0">After:</a></p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">// A bit more typing for the API author.</span>
+<span class="c1">// (Sadly, the parameters need to be specified individually – or Rust would</span>
+<span class="c1">// infer the concrete type from the first parameter given. This reads not as</span>
+<span class="c1">// nicely, and documentation might not look as pretty as before.)</span>
+<span class="k">fn</span> <span class="n">foo</span><span class="o">&lt;</span><span class="n">I</span><span class="p">,</span> <span class="n">D</span><span class="p">,</span> <span class="n">S</span><span class="o">&gt;</span><span class="p">(</span><span class="n">lorem</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">,</span> <span class="n">ipsum</span><span class="p">:</span> <span class="n">I</span><span class="p">,</span> <span class="n">dolor</span><span class="p">:</span> <span class="n">D</span><span class="p">,</span> <span class="n">sit</span><span class="p">:</span> <span class="n">S</span><span class="p">)</span> <span class="k">where</span>
+    <span class="n">I</span><span class="p">:</span> <span class="nb">Into</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+    <span class="n">D</span><span class="p">:</span> <span class="nb">Into</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+    <span class="n">S</span><span class="p">:</span> <span class="nb">Into</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">i32</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<span class="p">{</span>
+    <span class="nd">println!</span><span class="p">(</span><span class="s">"{}"</span><span class="p">,</span> <span class="n">lorem</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">);</span> <span class="c1">// Still weird</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="mi">42</span><span class="p">,</span> <span class="nb">None</span><span class="p">,</span> <span class="nb">None</span><span class="p">);</span>   <span class="c1">// Okay</span>
+    <span class="nf">foo</span><span class="p">(</span><span class="s">"bar"</span><span class="p">,</span> <span class="mi">42</span><span class="p">,</span> <span class="mi">1337</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">);</span>     <span class="c1">// Wow, that's nice! Gimme more APIs like this!</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h4 id="a-note-on-possibly-long-compile-times">A note on possibly long compile times</h4>
+
+<p>If you have:</p>
+
+<ol>
+  <li>a lot of type parameters (e.g. for the conversion traits)</li>
+  <li>on a complex/large function</li>
+  <li>which is used a lot</li>
+</ol>
+
+<p>then <code class="language-plaintext highlighter-rouge">rustc</code> will need to compile a lot of permutations of this function (it monomorphizes generic functions), which will lead to long compile times.</p>
+
+<p><a href="https://github.com/bluss">bluss</a> mentioned <a href="https://www.reddit.com/r/rust/comments/556c0g/optional_arguments_in_rust_112/d8839pu?context=1">on Reddit</a> that you can use “de-generization” to circumvent this issue: Your (public) generic function just calls another, (private) non-generic function, which will only be compiled once.</p>
+
+<p>The examples bluss gave was the implementation of <code class="language-plaintext highlighter-rouge">std::fs::OpenOptions::open</code> (<a href="https://doc.rust-lang.org/1.12.0/src/std/up/src/libstd/fs.rs.html#599-604">source</a> from Rust 1.12) and <a href="https://github.com/PistonDevelopers/image/pull/518">this pull request</a> on the <code class="language-plaintext highlighter-rouge">image</code> crate, which changed its <code class="language-plaintext highlighter-rouge">open</code> function to this:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">fn</span> <span class="n">open</span><span class="o">&lt;</span><span class="n">P</span><span class="o">&gt;</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">P</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">ImageResult</span><span class="o">&lt;</span><span class="n">DynamicImage</span><span class="o">&gt;</span> <span class="k">where</span> <span class="n">P</span><span class="p">:</span> <span class="nb">AsRef</span><span class="o">&lt;</span><span class="n">Path</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="c1">// thin wrapper function to strip generics before calling open_impl</span>
+    <span class="nf">open_impl</span><span class="p">(</span><span class="n">path</span><span class="nf">.as_ref</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h3 id="laziness">Laziness</h3>
+
+<p>While Rust does not have ‘laziness’ in the sense of lazy evaluation of expressions like Haskell implements it, there are several techniques you can use to elegantly omit doing unnecessary computations and allocations.</p>
+
+<h4 id="use-iterators">Use Iterators</h4>
+
+<p>One of the most amazing constructs in the standard library is <code class="language-plaintext highlighter-rouge">Iterator</code>, a trait that allows generator-like iteration of values where you only need to implement a <code class="language-plaintext highlighter-rouge">next</code> method<sup id="fnref:iterators-in-other-langs" role="doc-noteref"><a href="#fn:iterators-in-other-langs" class="footnote" rel="footnote">3</a></sup>. Rust’s iterators are lazy in that you explicitly need to call a consumer to start iterating through values. Just writing <code class="language-plaintext highlighter-rouge">"hello".chars().filter(char::is_whitespace)</code> won’t <em>do</em> anything until you call something like <code class="language-plaintext highlighter-rouge">.collect::&lt;String&gt;()</code> on it.</p>
+
+<h5 id="iterators-as-parameters">Iterators as parameters</h5>
+
+<p>Using iterators as inputs may make your API harder to read (taking a <code class="language-plaintext highlighter-rouge">T: Iterator&lt;Item=Thingy&gt;</code> vs. <code class="language-plaintext highlighter-rouge">&amp;[Thingy]</code>), but allows users to skip allocations.</p>
+
+<p><em>Actually</em>, though, you might not want to take a generic <code class="language-plaintext highlighter-rouge">Iterator</code>: Use <a href="https://doc.rust-lang.org/std/iter/trait.IntoIterator.html"><code class="language-plaintext highlighter-rouge">IntoIterator</code></a> instead. This way, can give you anything that you can easily turn into an iterator yourself by calling <code class="language-plaintext highlighter-rouge">.into_iter()</code> on it. It’s also quite easy to determine which types implement <code class="language-plaintext highlighter-rouge">IntoIterator</code>—as the documentation says:</p>
+
+<blockquote>
+  <p>One benefit of implementing IntoIterator is that your type will work with Rust’s for loop syntax.</p>
+</blockquote>
+
+<p>That is, everything a user can use in a <code class="language-plaintext highlighter-rouge">for</code> loop, they can also give to your function.</p>
+
+<h5 id="returningimplementing-iterators">Returning/implementing iterators</h5>
+
+<p>If you want to return something your users can use as an iterator, the best practice is to define a new type that implements <code class="language-plaintext highlighter-rouge">Iterator</code>. This may become easier once <code class="language-plaintext highlighter-rouge">impl Trait</code> is stabilized (see <a href="https://github.com/rust-lang/rust/issues/34511">the tracking issue</a>). You can find a bit more information about this in the <a href="https://github.com/alexcrichton/futures-rs/blob/f78905e584d06e69e5237ca12745ccd3d6f4a73a/TUTORIAL.md#returning-futures"><code class="language-plaintext highlighter-rouge">futures</code> tutorial</a> (as returning a <code class="language-plaintext highlighter-rouge">Future</code> and an <code class="language-plaintext highlighter-rouge">Iterator</code> has similar characteristics).</p>
+
+<h5 id="iterator-like-traits"><code class="language-plaintext highlighter-rouge">Iterator</code>-like traits</h5>
+
+<p>There are a few libraries that implement traits like <code class="language-plaintext highlighter-rouge">Iterator</code>, e.g.:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">futures::Stream</code>: As written in the <a href="https://github.com/alexcrichton/futures-rs/blob/f78905e584d06e69e5237ca12745ccd3d6f4a73a/TUTORIAL.md#the-stream-trait"><code class="language-plaintext highlighter-rouge">futures</code> tutorial</a>, where <code class="language-plaintext highlighter-rouge">Iterator::next</code> returns <code class="language-plaintext highlighter-rouge">Option&lt;Self::Item&gt;</code>, <code class="language-plaintext highlighter-rouge">Stream::poll</code> returns an async result of <code class="language-plaintext highlighter-rouge">Option&lt;Self::Item&gt;</code> (or an error).</li>
+</ul>
+
+<h4 id="take-closures">Take closures</h4>
+
+<p>If a potentially expensive value (let’s say of type <code class="language-plaintext highlighter-rouge">Value</code>) is not used in all branches in your control flow, consider taking a closure that returns that value (<code class="language-plaintext highlighter-rouge">Fn() -&gt; Value</code>).</p>
+
+<p>If you are designing a trait, you can also have two methods that do the same thing, but where one takes a value and the other a closure that computes the value. A real-life example of this pattern is in <code class="language-plaintext highlighter-rouge">Result</code> with <a href="https://doc.rust-lang.org/std/result/enum.Result.html#method.unwrap_or"><code class="language-plaintext highlighter-rouge">unwrap_or</code></a> and <a href="https://doc.rust-lang.org/std/result/enum.Result.html#method.unwrap_or_else"><code class="language-plaintext highlighter-rouge">unwrap_or_else</code></a>:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">res</span><span class="p">:</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="nb">i32</span><span class="p">,</span> <span class="o">&amp;</span><span class="nb">str</span><span class="o">&gt;</span> <span class="o">=</span> <span class="nf">Err</span><span class="p">(</span><span class="s">"oh noes"</span><span class="p">);</span>
+<span class="n">res</span><span class="nf">.unwrap_or</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span> <span class="c1">// just returns `42`</span>
+
+<span class="k">let</span> <span class="n">res</span><span class="p">:</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="nb">i32</span><span class="p">,</span> <span class="o">&amp;</span><span class="nb">str</span><span class="o">&gt;</span> <span class="o">=</span> <span class="nf">Err</span><span class="p">(</span><span class="s">"oh noes"</span><span class="p">);</span>
+<span class="n">res</span><span class="nf">.unwrap_or_else</span><span class="p">(|</span><span class="n">msg</span><span class="p">|</span> <span class="n">msg</span><span class="nf">.len</span><span class="p">()</span> <span class="k">as</span> <span class="nb">i32</span><span class="p">);</span> <span class="c1">// will call the closure</span>
+</code></pre></div></div>
+
+<h4 id="lazy-tricks">Lazy tricks</h4>
+
+<ul>
+  <li></li>
+  <li><em>Letting <code class="language-plaintext highlighter-rouge">Deref</code> do all the work:</em> Wrapper type with an implementation of <a href="https://doc.rust-lang.org/std/ops/trait.Deref.html"><code class="language-plaintext highlighter-rouge">Deref</code></a> that contains the logic to actually compute a value. The crate <a href="https://crates.io/crates/lazy"><code class="language-plaintext highlighter-rouge">lazy</code></a> implements a macro to do that for you (it requires unstable features, though).</li>
+</ul>
+
+<h3 id="convenience-traits">Convenience traits</h3>
+
+<p>Here are some traits you should try implement to make using your types easier/more consistent for your users:</p>
+
+<ul>
+  <li>Implement or derive the ‘usual’ traits like <code class="language-plaintext highlighter-rouge">Debug</code>, <code class="language-plaintext highlighter-rouge">Hash</code>, <code class="language-plaintext highlighter-rouge">PartialEq</code>, <code class="language-plaintext highlighter-rouge">PartialOrd</code>, <code class="language-plaintext highlighter-rouge">Eq</code>, <code class="language-plaintext highlighter-rouge">Ord</code></li>
+  <li>Implement or derive <a href="https://doc.rust-lang.org/std/default/trait.Default.html"><code class="language-plaintext highlighter-rouge">Default</code></a> instead of writing a <code class="language-plaintext highlighter-rouge">new</code> method without arguments</li>
+  <li>If you find yourself implementing a method on a type to return some of the type’s data as an <code class="language-plaintext highlighter-rouge">Iterator</code>, you should also consider implementing <a href="https://doc.rust-lang.org/std/iter/trait.IntoIterator.html"><code class="language-plaintext highlighter-rouge">IntoIterator</code></a> on that type. (This only works when there is only <em>one</em> obvious way to iterate over your type’s data. Also see section on iterators above.)</li>
+  <li>If your custom data type can be thought of in a similar fashion as a primitive data type <code class="language-plaintext highlighter-rouge">T</code> from <code class="language-plaintext highlighter-rouge">std</code>, consider implementing <a href="https://doc.rust-lang.org/std/ops/trait.Deref.html"><code class="language-plaintext highlighter-rouge">Deref&lt;Target=T&gt;</code></a>. But <em>please</em>  don’t overdo this – <code class="language-plaintext highlighter-rouge">Deref</code> is not meant to emulate inheritance!</li>
+  <li>Instead of writing a constructor method that takes a string and creates a new instance of your data type, implement <a href="https://doc.rust-lang.org/std/str/trait.FromStr.html"><code class="language-plaintext highlighter-rouge">FromStr</code></a>.</li>
+</ul>
+
+<h3 id="custom-traits-for-input-parameters">Custom traits for input parameters</h3>
+
+<p>The Rust way to implement a kind of “function overloading” is by using a generic trait <code class="language-plaintext highlighter-rouge">T</code> for one input parameter and implement <code class="language-plaintext highlighter-rouge">T</code> for all types the function should accept.</p>
+
+<h4 id="example-strfind">Example: <a href="https://doc.rust-lang.org/std/primitive.str.html#method.find"><code class="language-plaintext highlighter-rouge">str::find</code></a></h4>
+
+<p><code class="language-plaintext highlighter-rouge">str::find&lt;P: Pattern&gt;(p: P)</code> accepts a <a href="https://doc.rust-lang.org/std/str/pattern/trait.Pattern.html"><code class="language-plaintext highlighter-rouge">Pattern</code></a> which is implemented for <code class="language-plaintext highlighter-rouge">char</code>, <code class="language-plaintext highlighter-rouge">str</code>, <code class="language-plaintext highlighter-rouge">FnMut(char) -&gt; bool</code>, etc.</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="s">"Lorem ipsum"</span><span class="nf">.find</span><span class="p">(</span><span class="sc">'L'</span><span class="p">);</span>
+<span class="s">"Lorem ipsum"</span><span class="nf">.find</span><span class="p">(</span><span class="s">"ipsum"</span><span class="p">);</span>
+<span class="s">"Lorem ipsum"</span><span class="nf">.find</span><span class="p">(</span><span class="nn">char</span><span class="p">::</span><span class="n">is_whitespace</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h3 id="extension-traits">Extension traits</h3>
+
+<p>It’s a good practice to use types and traits defined in the standard library, as those are known by many Rust programmers, well-tested, and nicely documented. And while Rust’s standard library tends to offer types with semantic meaning<sup id="fnref:result-vs-either" role="doc-noteref"><a href="#fn:result-vs-either" class="footnote" rel="footnote">4</a></sup>, the methods implemented on these types might not be enough for your API. Luckily, Rust’s “orphan rules” allow you implement a trait for a (generic) type if at least one of them is defined in the current crate.</p>
+
+<h4 id="decorating-results">Decorating results</h4>
+
+<p>As <a href="https://twitter.com/Argorak">Florian</a> writes in <a href="http://yakshav.es/decorating-results/">“Decorating Results”</a>, you can use this to write and implement traits to supply your own methods to built-in types like <code class="language-plaintext highlighter-rouge">Result</code>. For example:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">trait</span> <span class="n">GrandResultExt</span> <span class="p">{</span>
+    <span class="k">fn</span> <span class="nf">party</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="k">Self</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">impl</span> <span class="n">GrandResultExt</span> <span class="k">for</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span> <span class="nb">Box</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;&gt;</span> <span class="p">{</span>
+    <span class="k">fn</span> <span class="nf">party</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Result</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span> <span class="nb">Box</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;&gt;</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="k">self</span><span class="nf">.is_ok</span><span class="p">()</span> <span class="p">{</span>
+          <span class="nd">println!</span><span class="p">(</span><span class="s">"Wooohoo! 🎉"</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="k">self</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// User's code</span>
+<span class="k">fn</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">fortune</span> <span class="o">=</span> <span class="nf">library_function</span><span class="p">()</span>
+        <span class="nf">.method_returning_result</span><span class="p">()</span>
+        <span class="nf">.party</span><span class="p">()</span>
+        <span class="nf">.unwrap_or</span><span class="p">(</span><span class="s">"Out of luck."</span><span class="nf">.to_string</span><span class="p">());</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>Florian’s real-life code in <a href="https://github.com/skade/lazers/blob/d9ace30c05cf103c5faf0660c06127b578c92762/lazers-traits/src/decorations.md#results-of-finding-a-database">lazers</a> uses the same pattern to decorate the <code class="language-plaintext highlighter-rouge">BoxFuture</code> (from the <code class="language-plaintext highlighter-rouge">futures</code> crate) to make the code more readable (abbreviated):</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">my_database</span> <span class="o">=</span> <span class="n">client</span>
+    <span class="nf">.find_database</span><span class="p">(</span><span class="s">"might_not_exist"</span><span class="p">)</span>
+    <span class="nf">.or_create</span><span class="p">();</span>
+</code></pre></div></div>
+
+<h4 id="extending-traits">Extending traits</h4>
+
+<p>So far, we’ve extended the methods available on a type by defining and implementing our own trait. You can also define traits that <em>extend other traits</em> (<code class="language-plaintext highlighter-rouge">trait MyTrait: BufRead + Debug {}</code>). The most prominent example for this is the <a href="https://crates.io/crates/itertools">itertools</a> crate, which adds a long list of methods to <code class="language-plaintext highlighter-rouge">std</code>’s Iterators.</p>
+
+<p>FYI: <a href="https://github.com/rust-lang/rfcs/blob/1f5d3a9512ba08390a2226aa71a5fe9e277954fb/text/0445-extension-trait-conventions.md">RFC 445</a> wants you to add an <code class="language-plaintext highlighter-rouge">Ext</code> suffix to extension traits.</p>
+
+<h3 id="builder-pattern">Builder pattern</h3>
+
+<p>You can make it easier to make complex API calls by chaining several smaller methods together. This works nicely with session types (see below). The <a href="https://crates.io/crates/derive_builder"><code class="language-plaintext highlighter-rouge">derive_builder</code></a> crate can be used to automatically generate (simpler) builders for custom structs.</p>
+
+<h4 id="example-stdfsopenoptions">Example: <a href="https://doc.rust-lang.org/std/fs/struct.OpenOptions.html"><code class="language-plaintext highlighter-rouge">std::fs::OpenOptions</code></a></h4>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">use</span> <span class="nn">std</span><span class="p">::</span><span class="nn">fs</span><span class="p">::</span><span class="n">OpenOptions</span><span class="p">;</span>
+<span class="k">let</span> <span class="n">file</span> <span class="o">=</span> <span class="nn">OpenOptions</span><span class="p">::</span><span class="nf">new</span><span class="p">()</span><span class="nf">.read</span><span class="p">(</span><span class="k">true</span><span class="p">)</span><span class="nf">.write</span><span class="p">(</span><span class="k">true</span><span class="p">)</span><span class="nf">.open</span><span class="p">(</span><span class="s">"foo.txt"</span><span class="p">);</span>
+</code></pre></div></div>
+
+<h3 id="session-types">Session types</h3>
+
+<p>You can encode a state machine in the type system.</p>
+
+<ol>
+  <li>Each state is a different type.</li>
+  <li>Each state type implements different methods.</li>
+  <li>Some methods consume a state type (by taking ownership of it) and return a different state type.</li>
+</ol>
+
+<p>This works really well in Rust as your methods can move your data into a new type and you can no longer access the old state afterwards.</p>
+
+<p>Here’s an arbitrary example about mailing a package
+(the type annotations are not necessary and are only added for clarity here):</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">package</span><span class="p">:</span> <span class="n">OpenPackage</span> <span class="o">=</span> <span class="nn">Package</span><span class="p">::</span><span class="nf">new</span><span class="p">();</span>
+<span class="k">let</span> <span class="n">package</span><span class="p">:</span> <span class="n">OpenPackage</span> <span class="o">=</span> <span class="n">package</span><span class="nf">.insert</span><span class="p">([</span><span class="n">stuff</span><span class="p">,</span> <span class="n">padding</span><span class="p">,</span> <span class="n">padding</span><span class="p">]);</span>
+
+<span class="k">let</span> <span class="n">package</span><span class="p">:</span> <span class="n">ClosedPackage</span> <span class="o">=</span> <span class="n">package</span><span class="nf">.seal_up</span><span class="p">();</span>
+
+<span class="c1">// let package: OpenPackage = package.insert([more_stuff]);</span>
+<span class="c1">//~^ ERROR: No method named `insert` on `ClosedPackage`</span>
+
+<span class="k">let</span> <span class="n">package</span><span class="p">:</span> <span class="n">DeliveryTracking</span> <span class="o">=</span> <span class="n">package</span><span class="nf">.send</span><span class="p">(</span><span class="n">address</span><span class="p">,</span> <span class="n">postage</span><span class="p">);</span>
+</code></pre></div></div>
+
+<p>A good real-life example was given by /u/ssokolow <a href="https://www.reddit.com/r/rust/comments/568yvh/typesafe_unions_in_c_and_rust/d8hcwfs">in this thread on /r/rust</a>:</p>
+
+<blockquote>
+  <p>Hyper uses this to ensure, at compile time, that it’s impossible to get into situations like the “tried to set HTTP headers after request/response body has begun” that we see periodically on PHP sites. (The compiler can catch that because there is no “set header” method on a connection in that state and the invalidating of stale references allows it to be certain that only the correct state is being referenced.)</p>
+</blockquote>
+
+<p>The <a href="http://hyper.rs/hyper/v0.9.10/hyper/server/index.html#an-aside-write-status"><code class="language-plaintext highlighter-rouge">hyper::server</code> docs</a> go into a bit of detail on how this is implemented. Another interesting idea can be found <a href="https://github.com/skade/lazers/blob/96efff493be9312ffc70eac5a04b441952e089eb/lazers-replicator/src/lib.md#verify-peers">in the lazers-replicator crate</a>: It uses <code class="language-plaintext highlighter-rouge">std::convert::From</code> to transition between states.</p>
+
+<p>More information:</p>
+
+<ul>
+  <li>The article <a href="https://insanitybit.github.io/2016/05/30/beyond-memory-safety-with-types">“Beyond Memory Safety With Types”</a> describes how this technique can be used to implement a nice and type safe interface for the IMAP protocol.</li>
+  <li>The paper <a href="http://munksgaard.me/laumann-munksgaard-larsen.pdf">“Session types for Rust” (PDF)</a> by Thomas Bracht Laumann Jespersen, Philip Munksgaard, and Ken Friis Larsen (2015). <a href="https://dx.doi.org/10.1145/2808098.2808100">DOI</a>.</li>
+  <li>Andrew Hobden’s post <a href="https://hoverbear.org/2016/10/12/rust-state-machine-pattern/">“Pretty State Machine Patterns in Rust”</a> shows several ways how one can implement state machines in Rust’s type system: Using one <code class="language-plaintext highlighter-rouge">enum</code> for all states, explicit <code class="language-plaintext highlighter-rouge">struct</code>s, a base <code class="language-plaintext highlighter-rouge">struct</code> generic over state <code class="language-plaintext highlighter-rouge">struct</code>s, and transitions using <code class="language-plaintext highlighter-rouge">Into</code>.</li>
+</ul>
+
+<h3 id="use-lifetimes-well">Use lifetimes well</h3>
+
+<p>Specifying type and trait constraints on your API is essential to designing an API in a statically typed language, and, as written above, to help your users prevent logic errors. Rust’s type system can also encode another dimension: You can also describe the lifetimes of your data (and write constraints on lifetimes).</p>
+
+<p>This can allow you (as a developer) to be more relaxed about giving out borrowed resources (instead of more computationally expensive owned data). Using references to data where possible is definitely a good practice in Rust, as high performance and “zero allocation” libraries are one of the languages selling points.</p>
+
+<p>You should try to write good documentation on this, though, as understanding lifetimes and dealing with references can present a challenge to users of your library, especially when they are new to Rust.</p>
+
+<p>For some reason (probably brevity), a lot of lifetimes are called <code class="language-plaintext highlighter-rouge">'a</code>, <code class="language-plaintext highlighter-rouge">'b</code>, or something similarly meaningless. If you know the resource for whose lifetime your references are valid, you can probably find a better name, though. For examples, if you read a file into memory and are working with references to that memory, call those lifetimes <code class="language-plaintext highlighter-rouge">'file</code>. Or if you are processing a TCP request and are parsing its data, you can call its lifetime <code class="language-plaintext highlighter-rouge">'req</code>.</p>
+
+<h4 id="put-finalizer-code-in-drop">Put finalizer code in <code class="language-plaintext highlighter-rouge">drop</code></h4>
+
+<p>Rust’s ownership rules work for more than just memory: If your data type represents an external resource (e.g., a TCP connection), you can use the <a href="https://doc.rust-lang.org/std/ops/trait.Drop.html"><code class="language-plaintext highlighter-rouge">Drop</code></a> trait to close/deallocate/clean up the resource when it goes out of scope. You can use this the same way as you would use finalizers (or <code class="language-plaintext highlighter-rouge">try … catch … finally</code>) in other languages.</p>
+
+<p>Real-life examples of this are:</p>
+
+<ul>
+  <li>The reference count types <code class="language-plaintext highlighter-rouge">Rc</code> and <code class="language-plaintext highlighter-rouge">Arc</code> use <code class="language-plaintext highlighter-rouge">Drop</code> to decrease their reference count (and deallocate the inner data if the count hits zero).</li>
+  <li><code class="language-plaintext highlighter-rouge">MutexGuard</code> uses <code class="language-plaintext highlighter-rouge">Drop</code> to release its lock on a <code class="language-plaintext highlighter-rouge">Mutex</code>.</li>
+  <li>The diesel crate implements <code class="language-plaintext highlighter-rouge">Drop</code> to close database connections (e.g. <a href="https://github.com/diesel-rs/diesel/blob/9ea449c480739253766bd097e7b06d038fe16590/diesel/src/sqlite/connection/raw.rs#L73">in SQLite</a>).</li>
+</ul>
+
+<h2 id="case-studies">Case Studies</h2>
+
+<p>Possible Rust libraries that use some nice tricks in their APIs:</p>
+
+<ul>
+  <li><a href="https://crates.io/crates/hyper">hyper</a>: session types (see above)</li>
+  <li><a href="https://crates.io/crates/diesel">diesel</a>: encodes SQL queries as types, uses traits with complex associated types</li>
+  <li><a href="https://crates.io/crates/futures">futures</a>: very abstract and well documented crate</li>
+</ul>
+
+<h2 id="other-design-patterns">Other design patterns</h2>
+
+<p>What I tried to cover here are design patterns for <em>interfaces</em>, i.e. APIs exposed to the user. While I believe that some of these patterns are only applicable to writing libraries, many also apply to writing generic application code.</p>
+
+<p>You can find more information on this topic in the <a href="https://github.com/rust-unofficial/patterns">Rust Design Patterns</a> repository.</p>
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:new" role="doc-endnote">
+      <p>If you can construct your type without any parameters, you should implement <a href="https://doc.rust-lang.org/std/default/trait.Default.html"><code class="language-plaintext highlighter-rouge">Default</code></a> on it, and use that instead of <code class="language-plaintext highlighter-rouge">new</code>. An exception to this is <code class="language-plaintext highlighter-rouge">new</code> on “container” types, like <code class="language-plaintext highlighter-rouge">Vec</code> or <code class="language-plaintext highlighter-rouge">HashMap</code>, where it makes sense to initialize an empty container. <a href="#fnref:new" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:illegal-states" role="doc-endnote">
+      <p>There is a slogan of “making illegal states unrepresentable” in other strongly typed languages. While I first heard this when talking to people about Haskell, it is also the title of <a href="http://fsharpforfunandprofit.com/posts/designing-with-types-making-illegal-states-unrepresentable/">this article</a> by <em>F# for fun and profit</em>, and <a href="https://www.youtube.com/watch?v=IcgmSRJHu_8">this talk</a> by Richard Feldman presented at elm-conf 2016. <a href="#fnref:illegal-states" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:iterators-in-other-langs" role="doc-endnote">
+      <p>In that regard, Rust’s Iterators are very similar to the <code class="language-plaintext highlighter-rouge">Iterator</code> interface in Java or the <code class="language-plaintext highlighter-rouge">Iteration</code> protocol in Python (as well as many others). <a href="#fnref:iterators-in-other-langs" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:result-vs-either" role="doc-endnote">
+      <p>For examples, <code class="language-plaintext highlighter-rouge">std</code> has an <code class="language-plaintext highlighter-rouge">Result</code> type (with <code class="language-plaintext highlighter-rouge">Ok</code> and <code class="language-plaintext highlighter-rouge">Err</code> variants) which should be used to handle errors, instead of an <code class="language-plaintext highlighter-rouge">Either</code> type (with <code class="language-plaintext highlighter-rouge">Left</code> and <code class="language-plaintext highlighter-rouge">Right</code> variants) which does not imply that meaning. <a href="#fnref:result-vs-either" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+
+  </div>
+
+  <footer class="article-footer">
+    <p>
+      Thanks for reading.
+      <a href="https://github.com/killercup/scribbles/issues/new">Comment on this post!</a>
+      <a href="https://github.com/killercup/scribbles/commits/gh-pages/_posts/2016-07-21-elegant-apis-in-rust.md">Revision history.</a>
+    </p>
+    
+    <p>
+      This post has been discussed on <a href="https://twitter.com/killercup/status/784391981673881600">Twitter (1)</a>, <a href="https://twitter.com/killercup/status/785496842964443136">Twitter (2)</a> and <a href="https://www.reddit.com/r/rust/comments/5koh1k/">/r/rust</a>.
+    </p>
+    
+    <p>
+      <a href="https://deterministic.space">Back to index</a>.
+    </p>
+  </footer>
+</article>
+
+  </div>
+  <footer class="container site-footer">
+    <nav>
+      <p>
+        <a href="/feed.xml">RSS feed</a>
+        
+        /
+        <a href="https://mastodon.social/@killercup">Follow me on Mastodon</a>
+        /
+        <a href="https://bsky.app/profile/killercup.de">Follow me on Bluesky</a>
+      </p>
+      <p>
+        <a href="https://creativecommons.org/licenses/by-nc/4.0/" rel="license">&copy; Copyright 2025 Pascal Hertleif</a>
+        /
+        <a href="https://pascalhertleif.de/impressum/">Imprint</a>
+      </p>
+    </nav>
+  </footer>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"9d3612be5ba14c6fa03507eaa47ecdb5","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>

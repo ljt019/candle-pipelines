@@ -11,7 +11,7 @@ pub struct ZeroShotClassificationPipelineBuilder<M: ZeroShotClassificationModel>
 );
 
 impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipelineBuilder<M> {
-    pub fn new(options: M::Options) -> Self {
+    pub(crate) fn new(options: M::Options) -> Self {
         Self(StandardPipelineBuilder::new(options))
     }
 

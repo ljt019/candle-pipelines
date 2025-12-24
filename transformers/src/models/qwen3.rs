@@ -22,7 +22,7 @@ pub enum Qwen3Size {
 }
 
 impl Qwen3Size {
-    pub fn to_id(&self) -> (String, String) {
+    pub(crate) fn to_id(&self) -> (String, String) {
         match self {
             Qwen3Size::Size0_6B => (
                 "unsloth/Qwen3-0.6B-GGUF".into(),

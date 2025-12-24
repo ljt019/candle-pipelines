@@ -20,7 +20,7 @@ pub struct TextGenerationPipelineBuilder<M: TextGenerationModel> {
 }
 
 impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
-    pub fn new(options: M::Options) -> Self {
+    pub(crate) fn new(options: M::Options) -> Self {
         Self {
             model_options: options,
             gen_params: GenerationParams::default(),

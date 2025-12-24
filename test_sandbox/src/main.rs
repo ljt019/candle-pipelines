@@ -8,20 +8,12 @@ async fn main() -> Result<()> {
         .build()
         .await?;
 
-    let response = pipeline.completion("How are you doing today?").await;
+    let response = pipeline.count_tokens("How are you doing today?");
 
     match response {
-        Ok(response) => println!("Response: {}", response),
-        Err(e) => match e {
-            TransformersError::Download(e) => {
-                println!("Download failed: {}", e);
-            }
-            TransformersError::ChatTemplate(e) => {
-                println!("Chat template error: {}", e);
-            }
-            _ => println!("Error: {}", e),
-        },
-    };
+        Ok(response) => println!("Token count: {}", response),
+        Err(e) => println!("Error: {}", e),
+    }
 
     Ok(())
 }

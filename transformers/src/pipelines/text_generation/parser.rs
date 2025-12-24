@@ -77,23 +77,23 @@ impl Event {
         }
     }
 
-    pub fn content(content: impl Into<String>) -> Self {
+    pub(crate) fn content(content: impl Into<String>) -> Self {
         Self::plain(TagParts::Content, content)
     }
 
-    pub fn plain_start() -> Self {
+    pub(crate) fn plain_start() -> Self {
         Self::plain(TagParts::Start, "")
     }
 
-    pub fn plain_end() -> Self {
+    pub(crate) fn plain_end() -> Self {
         Self::plain(TagParts::End, "")
     }
 
-    pub fn start(tag: Tag) -> Self {
+    pub(crate) fn start(tag: Tag) -> Self {
         Self::tagged(tag, TagParts::Start, "")
     }
 
-    pub fn end(tag: Tag) -> Self {
+    pub(crate) fn end(tag: Tag) -> Self {
         Self::tagged(tag, TagParts::End, "")
     }
 
@@ -114,7 +114,7 @@ impl Event {
         }
     }
 
-    pub fn tag_handle(&self) -> Option<&Tag> {
+    pub(crate) fn tag_handle(&self) -> Option<&Tag> {
         match self {
             Self::Tagged { tag, .. } => Some(tag),
             Self::Output { .. } => None,
