@@ -21,7 +21,7 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=$(grep '^version =' candle_pipelines_macros/Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+        run: echo "version=$(grep '^version =' candle_pipelines_macros/Cargo.toml | head -1 | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
 
       - name: Publish
         id: publish
@@ -51,7 +51,7 @@ jobs:
       - name: Update macros dependency
         run: |
           VERSION="${{ needs.publish_macros.outputs.version }}"
-          sed -i "s/candle_pipelines_macros = { path = \"\.\.\/candle_pipelines_macros\", version = \"[^\"]*\" }/candle_pipelines_macros = \"$VERSION\"/" candle_pipelines/Cargo.toml
+          sed -i "s/candle-pipelines-macros = { path = \"\.\.\/candle_pipelines_macros\", version = \"[^\"]*\" }/candle-pipelines-macros = \"$VERSION\"/" candle_pipelines/Cargo.toml
 
       - name: Wait for crates.io
         if: needs.publish_macros.outputs.published == 'true'
@@ -60,7 +60,7 @@ jobs:
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish -p candle_pipelines --allow-dirty
+        run: cargo publish -p candle-pipelines --allow-dirty
 
   release:
     name: GitHub Release

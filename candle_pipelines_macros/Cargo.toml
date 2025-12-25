@@ -1,5 +1,5 @@
 [package]
-name = "candle_pipelines_macros"
+name = "candle-pipelines-macros"
 version = "0.0.1"
 edition = "2021"
 description = "Procedural macros for candle_pipelines crate"
