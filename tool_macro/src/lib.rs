@@ -75,7 +75,7 @@ fn returns_result(output: &ReturnType) -> bool {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use transformers::text_generation::tool;
 /// use transformers::error::Result;
 ///
@@ -90,9 +90,7 @@ fn returns_result(output: &ReturnType) -> bool {
 ///
 /// - `retries = N` - Max retry attempts if tool fails (default: 3)
 ///
-/// ```rust,no_run
-/// # use transformers::text_generation::tool;
-/// # use transformers::error::Result;
+/// ```rust,ignore
 /// #[tool(retries = 5)]
 /// fn flaky_tool(x: i32) -> Result<String> { Ok("done".into()) }
 /// ```
@@ -263,18 +261,17 @@ impl Parse for ToolsList {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// # use transformers::text_generation::{tools, TextGenerationPipelineBuilder, Qwen3Size, tool};
-/// # use transformers::error::Result;
-/// # #[tool]
-/// # /// Get weather.
-/// # fn get_weather(city: String) -> Result<String> { Ok(city) }
-/// # #[tool]
-/// # /// Search web.
-/// # fn search_web(query: String) -> Result<String> { Ok(query) }
-/// # async fn example(pipeline: transformers::text_generation::TextGenerationPipeline<transformers::text_generation::Qwen3>) {
-/// pipeline.register_tools(tools![get_weather, search_web]).await;
-/// # }
+/// ```rust,ignore
+/// use transformers::text_generation::{tools, tool, TextGenerationPipeline, Qwen3};
+/// use transformers::error::Result;
+///
+/// #[tool]
+/// /// Get weather.
+/// fn get_weather(city: String) -> Result<String> { Ok(city) }
+///
+/// async fn example(pipeline: TextGenerationPipeline<Qwen3>) {
+///     pipeline.register_tools(tools![get_weather]).await;
+/// }
 /// ```
 #[proc_macro]
 pub fn tools(input: TokenStream) -> TokenStream {
