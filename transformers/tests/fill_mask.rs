@@ -1,4 +1,4 @@
-#![cfg(feature = "integration")]
+#![cfg(feature = "cuda")]
 
 use std::time::Instant;
 use transformers::error::Result;
@@ -7,7 +7,7 @@ use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 #[test]
 fn fill_mask_basic() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let res = pipeline.predict("The capital of France is [MASK].")?;
@@ -19,7 +19,7 @@ fn fill_mask_basic() -> Result<()> {
 #[test]
 fn fill_mask_empty_input_errors() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     assert!(pipeline.predict("").is_err());
@@ -29,7 +29,7 @@ fn fill_mask_empty_input_errors() -> Result<()> {
 #[test]
 fn fill_mask_batch_faster_than_sequential() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let texts: Vec<&str> = vec![

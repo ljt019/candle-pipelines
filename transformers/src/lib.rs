@@ -3,7 +3,7 @@
 //! Powered by the [Candle](https://github.com/huggingface/candle) crate, it offers an API inspired by Python's [Transformers](https://huggingface.co/docs/transformers)
 //! but tailored for Rust developers. Includes pipelines for generation, classification, and masked language modeling.
 
-//#![deny(missing_docs)]
+#![deny(missing_docs)]
 
 // ============ Internal API ============
 

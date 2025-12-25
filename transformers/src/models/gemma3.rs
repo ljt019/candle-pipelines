@@ -1,4 +1,3 @@
-use std::io::{Read, Seek};
 use std::sync::Arc;
 
 use candle_core::quantized::gguf_file;
@@ -15,11 +14,16 @@ use crate::loaders::GenerationConfig;
 use crate::loaders::{GenerationConfigLoader, GgufModelLoader, HfLoader, TokenizerLoader};
 use crate::pipelines::text_generation::model::{LanguageModelContext, TextGenerationModel};
 
+/// Available Gemma 3 model sizes.
 #[derive(Debug, Clone, Copy)]
 pub enum Gemma3Size {
+    /// 1 billion parameters.
     Size1B,
+    /// 4 billion parameters.
     Size4B,
+    /// 12 billion parameters.
     Size12B,
+    /// 27 billion parameters.
     Size27B,
 }
 
@@ -80,8 +84,9 @@ pub struct ModelInfo {
     pub target_device: Option<String>,
 }
 
+/// Only for generic annotations. Use [`TextGenerationPipelineBuilder::gemma3`](crate::text_generation::TextGenerationPipelineBuilder::gemma3).
 #[derive(Clone)]
-pub struct Gemma3Model {
+pub struct Gemma3 {
     base_weights: Arc<candle_gemma3::ModelWeights>,
     info: ModelInfo,
     tokenizer_repo_id: String,
@@ -89,7 +94,7 @@ pub struct Gemma3Model {
     chat_template_env: Arc<Environment<'static>>,
 }
 
-impl Gemma3Model {
+impl Gemma3 {
     fn parse_metadata(content: &gguf_file::Content, device: &Device) -> Result<ModelInfo> {
         let num_layers = content
             .metadata
@@ -153,9 +158,9 @@ impl Gemma3Model {
 
         env.add_template_owned("chat", chat_template_str.to_string())
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to parse chat template for Gemma3: {e}"),
-                )
+                TransformersError::Unexpected(format!(
+                    "Failed to parse chat template for Gemma3: {e}"
+                ))
             })?;
 
         Ok(Arc::new(env))
@@ -179,35 +184,7 @@ impl Gemma3Model {
         Ok(())
     }
 
-    pub async fn from_gguf<R: Read + Seek>(
-        reader: &mut R,
-        device: &Device,
-        size: Gemma3Size,
-    ) -> Result<Self> {
-        let content = gguf_file::Content::read(reader)?;
-        let info = Self::parse_metadata(&content, device)?;
-        let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
-            content, reader, device,
-        )?);
-
-        let tokenizer_repo_id = size.config_repo_id().to_string();
-        let generation_config =
-            GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json")
-                .load()
-                .await?;
-        Self::ensure_eos_tokens(&generation_config)?;
-        let chat_template_env = Self::load_chat_template_env(&tokenizer_repo_id).await?;
-
-        Ok(Self {
-            base_weights: weights,
-            info,
-            tokenizer_repo_id,
-            generation_config,
-            chat_template_env,
-        })
-    }
-
-    pub async fn from_hf(device: &Device, size: Gemma3Size) -> Result<Self> {
+    pub(crate) async fn from_hf(device: &Device, size: Gemma3Size) -> Result<Self> {
         let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
         let (mut file, content) = loader.load().await?;
         let info = Self::parse_metadata(&content, device)?;
@@ -232,13 +209,9 @@ impl Gemma3Model {
         })
     }
 
-    pub async fn get_tokenizer(&self) -> Result<Tokenizer> {
+    pub(crate) async fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new(&self.tokenizer_repo_id, "tokenizer.json");
         tokenizer_loader.load().await
-    }
-
-    pub fn create_context(&self) -> Context {
-        Context::new((*self.base_weights).clone())
     }
 }
 
@@ -291,16 +264,16 @@ impl LanguageModelContext for Context {
     }
 }
 
-impl TextGenerationModel for Gemma3Model {
+impl TextGenerationModel for Gemma3 {
     type Options = Gemma3Size;
     type Context = Context;
 
     async fn new(options: Self::Options, device: Device) -> Result<Self> {
-        Gemma3Model::from_hf(&device, options).await
+        Gemma3::from_hf(&device, options).await
     }
 
     async fn get_tokenizer(&self) -> Result<Tokenizer> {
-        Gemma3Model::get_tokenizer(self).await
+        Gemma3::get_tokenizer(self).await
     }
 
     fn apply_chat_template(
@@ -313,18 +286,18 @@ impl TextGenerationModel for Gemma3Model {
             .chat_template_env
             .get_template("chat")
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to get chat template for Gemma3: {e}"),
-                )
+                TransformersError::Unexpected(format!(
+                    "Failed to get chat template for Gemma3: {e}"
+                ))
             })?
             .render(context! {
                 messages => messages,
                 add_generation_prompt => true,
             })
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to render template for Gemma3 ({message_count} messages): {e}"),
-                )
+                TransformersError::Unexpected(format!(
+                    "Failed to render template for Gemma3 ({message_count} messages): {e}"
+                ))
             })?;
         Ok(rendered)
     }
@@ -342,7 +315,7 @@ impl TextGenerationModel for Gemma3Model {
     }
 
     fn new_context(&self) -> Context {
-        self.create_context()
+        Context::new((*self.base_weights).clone())
     }
 
     fn clear_context(&self, context: &mut Context) {

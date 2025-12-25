@@ -6,6 +6,21 @@ use crate::pipelines::utils::{BasePipelineBuilder, DeviceRequest, StandardPipeli
 
 crate::pipelines::utils::impl_device_methods!(delegated: ZeroShotClassificationPipelineBuilder<M: ZeroShotClassificationModel>);
 
+/// Builder for creating [`ZeroShotClassificationPipeline`] instances.
+///
+/// Use [`Self::modernbert`] as the entry point.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use transformers::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
+/// # fn main() -> transformers::error::Result<()> {
+/// let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
+///     .cuda(0)
+///     .build()?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct ZeroShotClassificationPipelineBuilder<M: ZeroShotClassificationModel>(
     StandardPipelineBuilder<M::Options>,
 );
@@ -15,6 +30,11 @@ impl<M: ZeroShotClassificationModel> ZeroShotClassificationPipelineBuilder<M> {
         Self(StandardPipelineBuilder::new(options))
     }
 
+    /// Builds the pipeline with configured settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model loading or device initialization fails.
     pub fn build(self) -> Result<ZeroShotClassificationPipeline<M>>
     where
         M: Clone + Send + Sync + 'static,
@@ -55,7 +75,8 @@ where
     }
 }
 
-impl ZeroShotClassificationPipelineBuilder<crate::models::modernbert::ZeroShotModernBertModel> {
+impl ZeroShotClassificationPipelineBuilder<super::ZeroShotModernBert> {
+    /// Creates a builder for a ModernBERT zero-shot classification model.
     pub fn modernbert(size: crate::models::ModernBertSize) -> Self {
         Self::new(size)
     }

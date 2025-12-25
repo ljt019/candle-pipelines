@@ -1,3 +1,7 @@
+//! Procedural macros for defining tools that can be called by language models.
+//!
+//! See [`tool`] and [`tools!`] for usage.
+
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -64,6 +68,34 @@ fn returns_result(output: &ReturnType) -> bool {
     false
 }
 
+/// Converts a function into a tool the model can call.
+///
+/// The function's doc comment becomes the tool description shown to the model.
+/// Parameters are automatically converted to a JSON schema.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use transformers::text_generation::tool;
+/// use transformers::error::Result;
+///
+/// #[tool]
+/// /// Get the current weather for a city.
+/// fn get_weather(city: String) -> Result<String> {
+///     Ok(format!("Weather in {}: sunny", city))
+/// }
+/// ```
+///
+/// # Options
+///
+/// - `retries = N` - Max retry attempts if tool fails (default: 3)
+///
+/// ```rust,no_run
+/// # use transformers::text_generation::tool;
+/// # use transformers::error::Result;
+/// #[tool(retries = 5)]
+/// fn flaky_tool(x: i32) -> Result<String> { Ok("done".into()) }
+/// ```
 #[proc_macro_attribute]
 pub fn tool(args: TokenStream, item: TokenStream) -> TokenStream {
     let max_retries = parse_tool_config(args);
@@ -227,6 +259,23 @@ impl Parse for ToolsList {
     }
 }
 
+/// Collects multiple tools into a `Vec<Tool>` for registration.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use transformers::text_generation::{tools, TextGenerationPipelineBuilder, Qwen3Size, tool};
+/// # use transformers::error::Result;
+/// # #[tool]
+/// # /// Get weather.
+/// # fn get_weather(city: String) -> Result<String> { Ok(city) }
+/// # #[tool]
+/// # /// Search web.
+/// # fn search_web(query: String) -> Result<String> { Ok(query) }
+/// # async fn example(pipeline: transformers::text_generation::TextGenerationPipeline<transformers::text_generation::Qwen3>) {
+/// pipeline.register_tools(tools![get_weather, search_web]).await;
+/// # }
+/// ```
 #[proc_macro]
 pub fn tools(input: TokenStream) -> TokenStream {
     let ToolsList { tools } = parse_macro_input!(input as ToolsList);

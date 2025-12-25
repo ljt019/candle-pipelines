@@ -41,10 +41,14 @@ impl PartialEq<&Tag> for Tag {
     }
 }
 
+/// Which part of a tag is being emitted during streaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagParts {
+    /// Opening tag (e.g., `<tool_call>`).
     Start,
+    /// Content between the opening and closing tags.
     Content,
+    /// Closing tag (e.g., `</tool_call>`).
     End,
 }
 

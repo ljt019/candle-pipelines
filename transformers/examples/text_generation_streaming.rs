@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
     // Start by creating the pipeline, using the builder to configure any generation parameters.
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(1024)
-        .cuda_device(0)
+        .cuda(0)
         .min_p(0.1)
         .build()
         .await?;

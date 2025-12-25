@@ -13,6 +13,36 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
+/// Pipeline that parses XML tags from generated output.
+/// Has a slightly stripped down API compared to the regular pipline,
+/// plan to rectify this in the future.
+///
+/// Created via [`TextGenerationPipelineBuilder::build_xml`](super::TextGenerationPipelineBuilder::build_xml).
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
+/// # #[tokio::main]
+/// # async fn main() -> transformers::error::Result<()> {
+/// let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
+///     .build_xml(&["think", "answer"])  // tags to parse
+///     .await?;
+///
+/// let events = pipeline.completion("Solve 2+2. Think step by step. Put your final answer in <answer></answer> tags.").await?;
+///
+/// for event in events {
+///     match (event.tag(), event.part()) {
+///         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
+///         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
+///         // Regular content outside of any tags
+///         (None, TagParts::Content) => print!("{}", event.get_content()),
+///         _ => {}
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub struct XmlTextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
     xml_parser: XmlParser,
@@ -20,7 +50,7 @@ pub struct XmlTextGenerationPipeline<M: TextGenerationModel> {
 }
 
 impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
-    pub async fn new(
+    pub(crate) async fn new(
         model: M,
         gen_params: GenerationParams,
         xml_parser: XmlParser,
@@ -34,18 +64,22 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
         })
     }
 
-    pub async fn context_position(&self) -> usize {
+    #[allow(dead_code)] // Only used for test below
+    pub(crate) async fn context_position(&self) -> usize {
         self.base.context_position().await
     }
 
+    /// Update generation parameters (temperature, top_p, etc.).
     pub async fn set_generation_params(&self, params: GenerationParams) {
         self.base.set_generation_params(params).await;
     }
 
+    /// Returns a reference to the XML parser.
     pub fn xml_parser(&self) -> &XmlParser {
         &self.xml_parser
     }
 
+    /// Generate and parse output into XML events.
     pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<Vec<Event>> {
         let text = match input.into() {
             Input::Prompt(p) => self.prompt_completion_internal(p).await?,
@@ -69,7 +103,13 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
             .base
             .model_tokenizer
             .encode(templated_prompt.as_str(), true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated_prompt.chars().take(50).collect::<String>(), e)))?
+            .map_err(|e| {
+                TransformersError::Tokenization(format!(
+                    "Tokenization failed on '{}...': {}",
+                    templated_prompt.chars().take(50).collect::<String>(),
+                    e
+                ))
+            })?
             .get_ids()
             .to_vec();
 
@@ -86,7 +126,13 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
             .base
             .model_tokenizer
             .encode(templated_prompt.as_str(), true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated_prompt.chars().take(50).collect::<String>(), e)))?
+            .map_err(|e| {
+                TransformersError::Tokenization(format!(
+                    "Tokenization failed on '{}...': {}",
+                    templated_prompt.chars().take(50).collect::<String>(),
+                    e
+                ))
+            })?
             .get_ids()
             .to_vec();
 
@@ -114,6 +160,7 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
         Ok(response)
     }
 
+    /// Stream XML events as tokens are generated.
     pub async fn completion_stream<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -135,7 +182,13 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated.as_str(), true)
-                    .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                    .map_err(|e| {
+                        TransformersError::Tokenization(format!(
+                            "Tokenization failed on '{}...': {}",
+                            templated.chars().take(50).collect::<String>(),
+                            e
+                        ))
+                    })?
                     .get_ids()
                     .to_vec();
 
@@ -147,7 +200,13 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated.as_str(), true)
-                    .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                    .map_err(|e| {
+                        TransformersError::Tokenization(format!(
+                            "Tokenization failed on '{}...': {}",
+                            templated.chars().take(50).collect::<String>(),
+                            e
+                        ))
+                    })?
                     .get_ids()
                     .to_vec();
 
@@ -208,32 +267,38 @@ impl<M: TextGenerationModel + Send> XmlTextGenerationPipeline<M> {
 }
 
 impl<M: TextGenerationModel + ToggleableReasoning> XmlTextGenerationPipeline<M> {
+    /// Enable or disable reasoning/thinking mode (Qwen3 only).
     pub async fn set_reasoning(&self, enable: bool) {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
 impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
+    /// Remove a tool by name.
     pub async fn unregister_tool(&self, name: &str) {
         self.base.model.lock().await.unregister_tool(name)
     }
 
+    /// Remove all registered tools.
     pub async fn clear_tools(&self) {
         self.base.model.lock().await.clear_tools()
     }
 
+    /// Register tools for the model to call. Use `tools![...]` macro.
     pub async fn register_tools(&self, tools: Vec<Tool>) {
         for tool in tools {
             self.base.model.lock().await.register_tool(tool);
         }
     }
 
+    /// Remove multiple tools.
     pub async fn unregister_tools(&self, tools: Vec<Tool>) {
         for tool in tools {
             self.base.model.lock().await.unregister_tool(&tool.name);
         }
     }
 
+    /// List all registered tools.
     pub async fn registered_tools(&self) -> Vec<Tool> {
         self.base.model.lock().await.registered_tools()
     }
@@ -247,13 +312,13 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
 
         for call in tool_calls {
             let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-            let tool =
-                tools
-                    .iter()
-                    .find(|t| t.name == call.name)
-                    .ok_or_else(|| TransformersError::Tool(
-                        format!("Tool '{}' not found. Registered tools: {}", call.name, available_tools.join(", "))
-                    ))?;
+            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+                TransformersError::Tool(format!(
+                    "Tool '{}' not found. Registered tools: {}",
+                    call.name,
+                    available_tools.join(", ")
+                ))
+            })?;
 
             let args = call.arguments.clone();
             let mut attempts = 0u32;
@@ -294,13 +359,17 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
         Ok(tool_responses)
     }
 
+    /// Generate with tool calling, returning parsed XML events.
     pub async fn completion_with_tools<'a>(
         &self,
         input: impl Into<Input<'a>>,
     ) -> Result<Vec<Event>> {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::Tool("No tools registered. Call register_tools() before completion_with_tools().".to_string()));
+            return Err(TransformersError::Tool(
+                "No tools registered. Call register_tools() before completion_with_tools()."
+                    .to_string(),
+            ));
         }
 
         let mut messages = match input.into() {
@@ -321,7 +390,13 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
                 .base
                 .model_tokenizer
                 .encode(templated.as_str(), true)
-                .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                .map_err(|e| {
+                    TransformersError::Tokenization(format!(
+                        "Tokenization failed on '{}...': {}",
+                        templated.chars().take(50).collect::<String>(),
+                        e
+                    ))
+                })?
                 .get_ids()
                 .to_vec();
 
@@ -374,6 +449,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
         }
     }
 
+    /// Stream XML events with tool calling.
     pub async fn completion_stream_with_tools<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -384,7 +460,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
     > {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::Tool("No tools registered. Call register_tools() before completion_with_tools().".to_string()));
+            return Err(TransformersError::Tool(
+                "No tools registered. Call register_tools() before completion_with_tools()."
+                    .to_string(),
+            ));
         }
 
         let initial_messages = match input.into() {
@@ -495,8 +574,8 @@ impl<M: TextGenerationModel + ToolCalling + Send> XmlTextGenerationPipeline<M> {
     }
 
     fn extract_tool_calls(text: &str) -> Result<Vec<ToolCallInvocation>> {
-        let tool_regex = Regex::new(r"(?s)<tool_call>(.*?)</tool_call>")
-            .expect("hardcoded regex is valid");
+        let tool_regex =
+            Regex::new(r"(?s)<tool_call>(.*?)</tool_call>").expect("hardcoded regex is valid");
         let mut tool_calls = Vec::new();
 
         for cap in tool_regex.captures_iter(text) {

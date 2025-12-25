@@ -1,4 +1,4 @@
-#![cfg(feature = "integration")]
+#![cfg(feature = "cuda")]
 
 use std::time::Instant;
 use transformers::error::Result;
@@ -7,7 +7,7 @@ use transformers::zero_shot::{ModernBertSize, ZeroShotClassificationPipelineBuil
 #[test]
 fn zero_shot_basic() -> Result<()> {
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let labels = ["politics", "sports"];
@@ -19,7 +19,7 @@ fn zero_shot_basic() -> Result<()> {
 #[test]
 fn zero_shot_batch_faster_than_sequential() -> Result<()> {
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let texts: Vec<&str> = vec![

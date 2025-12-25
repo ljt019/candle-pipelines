@@ -1,4 +1,4 @@
-#![cfg(feature = "integration")]
+#![cfg(feature = "cuda")]
 
 use std::time::Instant;
 use transformers::error::Result;
@@ -7,7 +7,7 @@ use transformers::sentiment::{ModernBertSize, SentimentAnalysisPipelineBuilder};
 #[test]
 fn sentiment_basic() -> Result<()> {
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let res = pipeline.predict("I love Rust!")?;
@@ -19,7 +19,7 @@ fn sentiment_basic() -> Result<()> {
 #[test]
 fn sentiment_batch_faster_than_sequential() -> Result<()> {
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base)
-        .cuda_device(0)
+        .cuda(0)
         .build()?;
 
     let texts: Vec<&str> = vec![

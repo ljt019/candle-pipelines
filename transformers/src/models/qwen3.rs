@@ -1,22 +1,27 @@
-use candle_core::quantized::gguf_file;
 use candle_core::{DType, Device, Result as CandleResult, Tensor};
 use candle_transformers::models::quantized_qwen3 as candle_qwen3;
 use minijinja::UndefinedBehavior;
 use minijinja::{context, Environment};
 use minijinja_contrib::{add_to_environment, pycompat};
-use std::io::{Read, Seek};
 use std::sync::Arc;
 use tokenizers::Tokenizer;
 
 use crate::error::{Result, TransformersError};
 
+/// Available Qwen 3 model sizes.
 #[derive(Debug, Clone, Copy)]
 pub enum Qwen3Size {
+    /// 0.6 billion parameters.
     Size0_6B,
+    /// 1.7 billion parameters.
     Size1_7B,
+    /// 4 billion parameters.
     Size4B,
+    /// 8 billion parameters.
     Size8B,
+    /// 14 billion parameters.
     Size14B,
+    /// 32 billion parameters.
     Size32B,
 }
 
@@ -73,8 +78,9 @@ impl crate::pipelines::cache::ModelOptions for Qwen3Size {
 
 use crate::loaders::{GgufModelLoader, TokenizerLoader};
 
+/// Only for generic annotations. Use [`TextGenerationPipelineBuilder::qwen3`](crate::text_generation::TextGenerationPipelineBuilder::qwen3).
 #[derive(Clone)]
-pub struct Qwen3Model {
+pub struct Qwen3 {
     weights: Arc<candle_qwen3::ModelWeights>,
     info: ModelInfo,
     reasoning: bool,
@@ -83,7 +89,7 @@ pub struct Qwen3Model {
     chat_template_env: Arc<Environment<'static>>,
 }
 
-impl Qwen3Model {
+impl Qwen3 {
     async fn load_chat_template_env() -> Result<Arc<Environment<'static>>> {
         let tokenizer_config_loader =
             crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
@@ -121,70 +127,15 @@ impl Qwen3Model {
         let chat_template_static = Box::leak(chat_template_owned.into_boxed_str());
         env.add_template("chat", chat_template_static)
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to parse chat template for Qwen3: {e}"),
-                )
+                TransformersError::Unexpected(format!(
+                    "Failed to parse chat template for Qwen3: {e}"
+                ))
             })?;
 
         Ok(Arc::new(env))
     }
-    pub async fn from_gguf<R: Read + Seek>(reader: &mut R, device: &Device) -> Result<Self> {
-        let content = gguf_file::Content::read(reader)?;
 
-        let num_layers = content
-            .metadata
-            .get("qwen3.block_count")
-            .ok_or_else(|| {
-                TransformersError::Unexpected(
-                    "Missing 'qwen3.block_count' in Qwen3 model metadata".to_string(),
-                )
-            })?
-            .to_u32()? as usize;
-        let max_seq_len = content
-            .metadata
-            .get("qwen3.context_length")
-            .ok_or_else(|| {
-                TransformersError::Unexpected(
-                    "Missing 'qwen3.context_length' in Qwen3 model metadata".to_string(),
-                )
-            })?
-            .to_u32()? as usize;
-        let dtype = match content.metadata.get("general.dtype") {
-            Some(v) => match v.to_u32().unwrap_or(1) {
-                0 => DType::F32,
-                1 => DType::F16,
-                _ => DType::F16,
-            },
-            None => DType::F16,
-        };
-        let info = ModelInfo {
-            num_layers,
-            max_seq_len,
-            dtype,
-            device: device.clone(),
-        };
-
-        let weights = Arc::new(candle_qwen3::ModelWeights::from_gguf(
-            content, reader, device,
-        )?);
-        let generation_config = crate::loaders::GenerationConfigLoader::new(
-            "Qwen/Qwen3-0.6B",
-            "generation_config.json",
-        )
-        .load()
-        .await?;
-        let chat_template_env = Self::load_chat_template_env().await?;
-        Ok(Self {
-            weights,
-            info,
-            reasoning: true,
-            generation_config,
-            tools: Vec::new(),
-            chat_template_env,
-        })
-    }
-
-    pub async fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
+    pub(crate) async fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
         let (repo_id, file_name) = size.to_id();
 
         let model_loader = GgufModelLoader::new(&repo_id, &file_name);
@@ -244,22 +195,10 @@ impl Qwen3Model {
         })
     }
 
-    pub async fn get_tokenizer(&self) -> Result<Tokenizer> {
+    pub(crate) async fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new("Qwen/Qwen3-0.6B", "tokenizer.json");
         let tokenizer = tokenizer_loader.load().await?;
         Ok(tokenizer)
-    }
-
-    pub fn new_context(&self) -> Context {
-        Context::new(self.weights.clone(), self.info.clone())
-    }
-
-    pub fn new_context_with_cache_size(&self, cache_size: usize) -> Context {
-        Context::with_cache_size(self.weights.clone(), self.info.clone(), cache_size)
-    }
-
-    pub fn info(&self) -> ModelInfo {
-        self.info.clone()
     }
 }
 
@@ -345,7 +284,7 @@ impl LanguageModelContext for Context {
     }
 }
 
-impl TextGenerationModel for Qwen3Model {
+impl TextGenerationModel for Qwen3 {
     type Context = Context;
     type Options = Qwen3Size;
 
@@ -370,11 +309,11 @@ impl TextGenerationModel for Qwen3Model {
     }
 
     async fn new(options: Self::Options, device: candle_core::Device) -> Result<Self> {
-        Qwen3Model::from_hf(&device, options).await
+        Qwen3::from_hf(&device, options).await
     }
 
     async fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer> {
-        Qwen3Model::get_tokenizer(self).await
+        Qwen3::get_tokenizer(self).await
     }
 
     fn apply_chat_template(
@@ -419,9 +358,7 @@ impl TextGenerationModel for Qwen3Model {
             .chat_template_env
             .get_template("chat")
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to get chat template for Qwen3: {e}"),
-                )
+                TransformersError::Unexpected(format!("Failed to get chat template for Qwen3: {e}"))
             })?
             .render(context! {
                 messages => messages_dicts,
@@ -430,9 +367,9 @@ impl TextGenerationModel for Qwen3Model {
                 tools => self.registered_tools(),
             })
             .map_err(|e| {
-                TransformersError::Unexpected(
-                    format!("Failed to render template for Qwen3 ({message_count} messages): {e}"),
-                )
+                TransformersError::Unexpected(format!(
+                    "Failed to render template for Qwen3 ({message_count} messages): {e}"
+                ))
             })?;
 
         Ok(rendered)
@@ -462,7 +399,7 @@ impl TextGenerationModel for Qwen3Model {
     }
 }
 
-impl ToggleableReasoning for Qwen3Model {
+impl ToggleableReasoning for Qwen3 {
     fn set_reasoning(&mut self, enable: bool) {
         self.reasoning = enable;
     }
@@ -470,7 +407,7 @@ impl ToggleableReasoning for Qwen3Model {
 
 use crate::pipelines::text_generation::tools::Tool;
 
-impl ToolCalling for Qwen3Model {
+impl ToolCalling for Qwen3 {
     fn register_tool(&mut self, tool: Tool) {
         if let Some(pos) = self.tools.iter().position(|t| t.name() == tool.name()) {
             self.tools[pos] = tool;

@@ -6,6 +6,21 @@ use crate::pipelines::utils::{BasePipelineBuilder, DeviceRequest, StandardPipeli
 
 crate::pipelines::utils::impl_device_methods!(delegated: FillMaskPipelineBuilder<M: FillMaskModel>);
 
+/// Builder for creating [`FillMaskPipeline`] instances.
+///
+/// Use [`Self::modernbert`] as the entry point.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
+/// # fn main() -> transformers::error::Result<()> {
+/// let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base)
+///     .cuda(0)
+///     .build()?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct FillMaskPipelineBuilder<M: FillMaskModel>(StandardPipelineBuilder<M::Options>);
 
 impl<M: FillMaskModel> FillMaskPipelineBuilder<M> {
@@ -13,6 +28,11 @@ impl<M: FillMaskModel> FillMaskPipelineBuilder<M> {
         Self(StandardPipelineBuilder::new(options))
     }
 
+    /// Builds the pipeline with configured settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model loading or device initialization fails.
     pub fn build(self) -> Result<FillMaskPipeline<M>>
     where
         M: Clone + Send + Sync + 'static,
@@ -52,7 +72,8 @@ where
     }
 }
 
-impl FillMaskPipelineBuilder<crate::models::modernbert::FillMaskModernBertModel> {
+impl FillMaskPipelineBuilder<super::FillMaskModernBert> {
+    /// Creates a builder for a ModernBERT fill-mask model.
     pub fn modernbert(size: crate::models::ModernBertSize) -> Self {
         Self::new(size)
     }

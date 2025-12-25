@@ -17,7 +17,7 @@ Transformers provides a simple, intuitive interface for Rust developers who want
 
 ### Text Generation Pipeline
 
-Generate text for various applications, supports general completions, as well as function/tool calling, and streamed responsees.
+Generate text for various applications, supports general completions, as well as function/tool calling, and streamed responses.
 
 ---
 
@@ -116,17 +116,19 @@ There are two basic ways to generate text:
 Use the `completion` method for straightforward text generation from a single prompt string.
 
 ```rust
-use transformers::pipelines::text_generation::*;
+use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // 1. Create the pipeline
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .temperature(0.7)
         .top_k(40)
-        .build()?;
+        .build()
+        .await?;
 
     // 2. Generate a completion
-    let completion = pipeline.completion(prompt)?;
+    let completion = pipeline.completion("What is the meaning of life?").await?;
     println!("{}", completion);
 
     Ok(())
@@ -144,25 +146,25 @@ The `Message` struct represents a single message in a chat and has a `role` (sys
 - `Message::assistant(content: &str)`: For model responses.
 
 ```rust
-use transformers::pipelines::text_generation::TextGenerationPipelineBuilder;
-use transformers::pipelines::text_generation::Messages;
-use futures::StreamExt;
+use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // 1. Create the pipeline
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .temperature(0.7)
         .top_k(40)
-        .build()?;
+        .build()
+        .await?;
 
     // 2. Create the messages
-    let mut messages = vec![
+    let messages = vec![
         Message::system("You are a helpful assistant."),
         Message::user("What is the meaning of life?"),
     ];
 
     // 3. Generate a completion
-    let completion = pipeline.completion(&messages)?;
+    let completion = pipeline.completion(&messages).await?;
     println!("{}", completion);
 
     Ok(())
@@ -176,33 +178,29 @@ Using tools with models is also made extremely easy, you just define tools using
 Using the tools is as easy as calling `completion_with_tools` after having tools registered to the pipeline.
 
 ```rust
-use transformers::pipelines::text_generation::TextGenerationPipelineBuilder;
-use transformers::pipelines::text_generation::Messages;
-use transformers::Result;
+use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, tool, tools};
+use transformers::error::Result;
 
 // 1. Define the tools
 #[tool]
 /// Get the weather for a given city in degrees celsius.
-fn get_temperature(city: String) -> Result<String, ToolError> {
-    return Ok(format!(
-        "The temperature is 20 degrees celsius in {}.",
-        city
-    ));
+fn get_temperature(city: String) -> Result<String> {
+    Ok(format!("The temperature is 20 degrees celsius in {}.", city))
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // 2. Create the pipeline
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(8192)
-        .build()?;
-
-    println!("Pipeline built successfully.");
+        .build()
+        .await?;
 
     // 3. Register the tools
-    pipeline.register_tools(tools![get_temperature, get_humidity])?;
+    pipeline.register_tools(tools![get_temperature]).await;
 
     // 4. Get a completion
-    let completion = pipeline.completion_with_tools("What's the weather like in Tokyo?")
+    let completion = pipeline.completion_with_tools("What's the weather like in Tokyo?").await?;
     println!("{}", completion);
 
     Ok(())
@@ -212,7 +210,8 @@ fn main() -> anyhow::Result<()> {
 Tools can also be asynchronous, allowing you to perform network or file I/O directly inside the handler:
 
 ```rust
-use transformers::Result;
+use transformers::error::Result;
+use transformers::text_generation::tool;
 
 #[tool]
 /// Echoes a message after waiting for a bit.
@@ -236,19 +235,22 @@ helpers now return a `Result` to surface any errors that may occur during
 streaming.
 
 ```rust
-use transformers::pipelines::text_generation::TextGenerationPipelineBuilder;
-use transformers::pipelines::text_generation::Messages;
+use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+use futures::StreamExt;
+use std::io::Write;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // 1. Create the pipeline
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(1024)
-        .build()?;
+        .build()
+        .await?;
 
     // 2. Get a completion using stream method
     let mut stream = pipeline.completion_stream(
         "Explain the concept of Large Language Models in simple terms.",
-    )?;
+    ).await?;
 
     // 3. Do something with tokens as they are generated
     while let Some(tok) = stream.next().await {
@@ -265,9 +267,10 @@ fn main() -> anyhow::Result<()> {
 You can build pipelines with XML parsing capabilities to handle structured outputs from models. This is particularly useful for parsing tool calls, and reasoning traces.
 
 ```rust
-use transformers::pipelines::text_generation::*;
+use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     // 1. Build a pipeline with XML parsing for specific tags
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(1024)
@@ -304,19 +307,17 @@ The XML parser also works with streaming completions, emitting events as XML tag
 ### Fill Mask (ModernBERT)
 
 ```rust
-use transformers::pipelines::fill_mask::{
-    FillMaskPipelineBuilder, ModernBertSize,
-};
+use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 
 fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
-    let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base;).build()?;
+    let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Fill the mask
-    let prompt = "The capital of France is [MASK].";
-    let filled_text = pipeline.fill_mask(prompt)?;
+    let prediction = pipeline.predict("The capital of France is [MASK].")?;
 
-    println!("{}", filled_text); // Should print: The capital of France is Paris.
+    println!("{}: {:.2}", prediction.word, prediction.score);
+    // Output: Paris: 0.98
     Ok(())
 }
 ```
@@ -324,18 +325,17 @@ fn main() -> anyhow::Result<()> {
 ### Sentiment Analysis (ModernBERT Finetune)
 
 ```rust
-use transformers::pipelines::sentiment::{SentimentAnalysisPipelineBuilder, ModernBertSize};
-use anyhow::Result;
+use transformers::sentiment::{SentimentAnalysisPipelineBuilder, ModernBertSize};
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Analyze sentiment
-    let sentiment = pipeline.predict("I love using Rust for my projects!")?;
+    let result = pipeline.predict("I love using Rust for my projects!")?;
 
-    println!("Text: {}", sentence);
-    println!("Predicted Sentiment: {}", sentiment); // Should predict positive sentiment
+    println!("Sentiment: {} (confidence: {:.2})", result.label, result.score);
+    // Output: Sentiment: positive (confidence: 0.98)
     Ok(())
 }
 ```
@@ -344,28 +344,25 @@ fn main() -> Result<()> {
 
 Zero-shot classification offers two methods for different use cases:
 
-#### Single-Label Classification (`predict`)
+#### Single-Label Classification (`classify`)
 
 Use when you want to classify text into one of several **mutually exclusive** categories. Probabilities sum to 1.0.
 
 ```rust
-use transformers::pipelines::zero_shot::{
-    ZeroShotClassificationPipelineBuilder, ModernBertSize,
-};
-use anyhow::Result;
+use transformers::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Single-label classification
     let text = "The Federal Reserve raised interest rates.";
-    let candidate_labels = ["economics", "politics", "technology", "sports"];
-    let results = pipeline.predict(text, &candidate_labels)?;
+    let candidate_labels = &["economics", "politics", "technology", "sports"];
+    let results = pipeline.classify(text, candidate_labels)?;
 
     println!("Text: {}", text);
-    for (label, score) in results {
-        println!("- {}: {:.4}", label, score);
+    for result in results {
+        println!("- {}: {:.4}", result.label, result.score);
     }
     // Example output (probabilities sum to 1.0):
     // - economics: 0.8721
@@ -377,28 +374,25 @@ fn main() -> Result<()> {
 }
 ```
 
-#### Multi-Label Classification (`predict_multi_label`)
+#### Multi-Label Classification (`classify_multi_label`)
 
 Use when labels can be **independent** and multiple labels could apply to the same text. Returns raw entailment probabilities.
 
 ```rust
-use transformers::pipelines::zero_shot::{
-    ZeroShotClassificationPipelineBuilder, ModernBertSize,
-};
-use anyhow::Result;
+use transformers::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
     let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Multi-label classification
     let text = "I love reading books about machine learning and artificial intelligence.";
-    let candidate_labels = ["technology", "education", "reading", "science"];
-    let results = pipeline.predict_multi_label(text, &candidate_labels)?;
+    let candidate_labels = &["technology", "education", "reading", "science"];
+    let results = pipeline.classify_multi_label(text, candidate_labels)?;
 
     println!("Text: {}", text);
-    for (label, score) in results {
-        println!("- {}: {:.4}", label, score);
+    for result in results {
+        println!("- {}: {:.4}", result.label, result.score);
     }
     // Example output (independent probabilities):
     // - technology: 0.9234

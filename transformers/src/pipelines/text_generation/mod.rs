@@ -168,7 +168,7 @@ pub use tools::ToolFuture;
 
 // ============ Public API ============
 
-pub use crate::models::{Gemma3Model, Gemma3Size, Qwen3Model, Qwen3Size};
+pub use crate::models::{Gemma3, Gemma3Size, Qwen3, Qwen3Size};
 pub use builder::TextGenerationPipelineBuilder;
 pub use message::Message;
 pub use params::GenerationParams;

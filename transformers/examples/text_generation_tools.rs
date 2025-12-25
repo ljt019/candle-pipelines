@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
 
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(8192)
-        .cuda_device(0)
+        .cuda(0)
         .tool_error_strategy(ErrorStrategy::ReturnToModel) // let model handle tool errors
         .build()
         .await?;

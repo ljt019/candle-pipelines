@@ -1,6 +1,6 @@
 [package]
 name = "tool_macro"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Procedural macros for transformers crate"
 license = "MIT OR Apache-2.0"

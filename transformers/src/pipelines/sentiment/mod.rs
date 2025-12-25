@@ -60,4 +60,7 @@ pub(crate) mod pipeline;
 
 pub use crate::models::ModernBertSize;
 pub use builder::SentimentAnalysisPipelineBuilder;
-pub use pipeline::SentimentAnalysisPipeline;
+pub use pipeline::{SentimentAnalysisPipeline, SentimentResult};
+
+/// Only for generic annotations. Use [`SentimentAnalysisPipelineBuilder::modernbert`].
+pub type SentimentModernBert = crate::models::modernbert::SentimentModernBertModel;

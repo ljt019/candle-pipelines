@@ -20,9 +20,9 @@ impl DeviceRequest {
                 CudaDevice::new_with_stream(i)
                     .map(Device::Cuda)
                     .map_err(|e| {
-                        TransformersError::Device(
-                            format!("Failed to init CUDA device {i}: {e}. Try CPU as fallback.")
-                        )
+                        TransformersError::Device(format!(
+                            "Failed to init CUDA device {i}: {e}. Try CPU as fallback."
+                        ))
                     })
             }
         }
@@ -32,12 +32,14 @@ impl DeviceRequest {
 macro_rules! impl_device_methods {
     (direct: $builder:ident < $($gen:ident : $bound:path),* >) => {
         impl<$($gen: $bound),*> $builder<$($gen),*> {
+            /// Use CPU for inference (default).
             pub fn cpu(mut self) -> Self {
                 self.device_request = crate::pipelines::utils::DeviceRequest::Cpu;
                 self
             }
 
-            pub fn cuda_device(mut self, index: usize) -> Self {
+            /// Use a specific CUDA GPU for inference.
+            pub fn cuda(mut self, index: usize) -> Self {
                 self.device_request = crate::pipelines::utils::DeviceRequest::Cuda(index);
                 self
             }
@@ -46,12 +48,14 @@ macro_rules! impl_device_methods {
 
     (delegated: $builder:ident < $($gen:ident : $bound:path),* >) => {
         impl<$($gen: $bound),*> $builder<$($gen),*> {
+            /// Use CPU for inference (default).
             pub fn cpu(mut self) -> Self {
                 *self.0.device_request_mut() = crate::pipelines::utils::DeviceRequest::Cpu;
                 self
             }
 
-            pub fn cuda_device(mut self, index: usize) -> Self {
+            /// Use a specific CUDA GPU for inference.
+            pub fn cuda(mut self, index: usize) -> Self {
                 *self.0.device_request_mut() = crate::pipelines::utils::DeviceRequest::Cuda(index);
                 self
             }

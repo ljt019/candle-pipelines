@@ -14,9 +14,12 @@ use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
 use crate::pipelines::sentiment::pipeline::SentimentResult;
 use crate::pipelines::zero_shot::model::LabelScores;
 
+/// Available ModernBERT model sizes.
 #[derive(Debug, Clone, Copy)]
 pub enum ModernBertSize {
+    /// Base model (~150M parameters).
     Base,
+    /// Large model (~400M parameters).
     Large,
 }
 

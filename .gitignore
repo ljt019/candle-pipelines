@@ -5,7 +5,4 @@
 .vscode
 .claude
 
-*.md
-!tasks/*/*.md
-!AGENTS.md
-!README.md
+

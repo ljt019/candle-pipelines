@@ -14,9 +14,12 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::Deserialize;
 
+/// Input type for completion methods. Accepts prompts or message arrays.
 #[derive(Debug, Clone)]
 pub enum Input<'a> {
+    /// A single prompt string.
     Prompt(&'a str),
+    /// A conversation as a slice of messages.
     Messages(&'a [super::message::Message]),
 }
 
@@ -44,13 +47,38 @@ impl<'a> From<&'a String> for Input<'a> {
     }
 }
 
+/// Pipeline for generating text from prompts or conversations.
+///
+/// Created via [`TextGenerationPipelineBuilder`](super::TextGenerationPipelineBuilder).
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
+///
+/// # async fn example() -> transformers::error::Result<()> {
+/// let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
+///     .build()
+///     .await?;
+///
+/// // Simple prompt
+/// let response = pipeline.completion("What is Rust?").await?;
+///
+/// // Multi-turn conversation
+/// let messages = vec![
+///     Message::system("You are a helpful assistant."),
+///     Message::user("What is 2+2?"),
+/// ];
+/// let response = pipeline.completion(&messages).await?;
+/// # Ok(())
+/// # }
 pub struct TextGenerationPipeline<M: TextGenerationModel> {
     base: BasePipeline<M>,
     tool_error_strategy: ErrorStrategy,
 }
 
 impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
-    pub async fn new(
+    pub(crate) async fn new(
         model: M,
         gen_params: GenerationParams,
         device: candle_core::Device,
@@ -62,40 +90,45 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         })
     }
 
+    /// Returns the current tool error handling strategy.
     pub fn tool_error_strategy(&self) -> &ErrorStrategy {
         &self.tool_error_strategy
     }
 
-    pub async fn context_position(&self) -> usize {
-        self.base.context_position().await
-    }
-
+    /// Returns stats from the last generation (tokens, timing).
     pub fn last_generation_stats(&self) -> Option<GenerationStats> {
         self.base.last_generation_stats()
     }
 
+    /// Update generation parameters (temperature, top_p, etc.).
     pub async fn set_generation_params(&self, params: GenerationParams) {
         self.base.set_generation_params(params).await;
     }
 
+    /// Returns the model's maximum context length in tokens.
     pub async fn max_context_length(&self) -> usize {
         self.base.model.lock().await.get_max_seq_len()
     }
 
+    /// Count tokens in text without generating.
     pub fn count_tokens(&self, text: &str) -> Result<usize> {
-        let tokens = self
-            .base
-            .model_tokenizer
-            .encode(text, false)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", text.chars().take(50).collect::<String>(), e)))?;
+        let tokens = self.base.model_tokenizer.encode(text, false).map_err(|e| {
+            TransformersError::Tokenization(format!(
+                "Tokenization failed on '{}...': {}",
+                text.chars().take(50).collect::<String>(),
+                e
+            ))
+        })?;
         Ok(tokens.get_ids().len())
     }
 
+    /// Clear the KV cache.
     pub async fn clear_cache(&self) {
         self.base.context.lock().await.reset();
         self.base.last_processed_tokens.lock().await.clear();
     }
 
+    /// Generate a completion from a prompt or messages.
     pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
         match input.into() {
             Input::Prompt(p) => self.prompt_completion_internal(p).await,
@@ -103,6 +136,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
+    /// Generate a completion and return generation statistics.
     pub async fn completion_with_stats<'a>(
         &self,
         input: impl Into<Input<'a>>,
@@ -113,23 +147,11 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         }
     }
 
+    /// Generate completions for multiple prompts sequentially.
     pub async fn completion_batch(&self, prompts: &[&str]) -> Result<Vec<Result<String>>> {
         let mut outputs = Vec::with_capacity(prompts.len());
         for prompt in prompts {
             outputs.push(self.prompt_completion_internal(prompt).await);
-        }
-        Ok(outputs)
-    }
-
-    pub async fn chat_batch(
-        &self,
-        conversations: &[&[super::message::Message]],
-    ) -> Result<Vec<Result<String>>> {
-        let mut outputs = Vec::with_capacity(conversations.len());
-        for messages in conversations {
-            self.base.context.lock().await.reset();
-            self.base.last_processed_tokens.lock().await.clear();
-            outputs.push(self.message_completion_internal(messages).await);
         }
         Ok(outputs)
     }
@@ -156,7 +178,13 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .base
             .model_tokenizer
             .encode(templated_prompt.as_str(), true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated_prompt.chars().take(50).collect::<String>(), e)))?
+            .map_err(|e| {
+                TransformersError::Tokenization(format!(
+                    "Tokenization failed on '{}...': {}",
+                    templated_prompt.chars().take(50).collect::<String>(),
+                    e
+                ))
+            })?
             .get_ids()
             .to_vec();
 
@@ -186,7 +214,13 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
             .base
             .model_tokenizer
             .encode(templated_prompt.as_str(), true)
-            .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated_prompt.chars().take(50).collect::<String>(), e)))?
+            .map_err(|e| {
+                TransformersError::Tokenization(format!(
+                    "Tokenization failed on '{}...': {}",
+                    templated_prompt.chars().take(50).collect::<String>(),
+                    e
+                ))
+            })?
             .get_ids()
             .to_vec();
 
@@ -220,6 +254,7 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
         Ok((response, stats))
     }
 
+    /// Stream tokens as they're generated.
     pub async fn completion_stream<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -241,7 +276,13 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated.as_str(), true)
-                    .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                    .map_err(|e| {
+                        TransformersError::Tokenization(format!(
+                            "Tokenization failed on '{}...': {}",
+                            templated.chars().take(50).collect::<String>(),
+                            e
+                        ))
+                    })?
                     .get_ids()
                     .to_vec();
                 let prompt_tokens = tokens.len();
@@ -253,7 +294,13 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
                     .base
                     .model_tokenizer
                     .encode(templated.as_str(), true)
-                    .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                    .map_err(|e| {
+                        TransformersError::Tokenization(format!(
+                            "Tokenization failed on '{}...': {}",
+                            templated.chars().take(50).collect::<String>(),
+                            e
+                        ))
+                    })?
                     .get_ids()
                     .to_vec();
 
@@ -296,32 +343,38 @@ impl<M: TextGenerationModel + Send> TextGenerationPipeline<M> {
 }
 
 impl<M: TextGenerationModel + ToggleableReasoning> TextGenerationPipeline<M> {
+    /// Enable or disable reasoning/thinking mode for models that support it.
     pub async fn set_reasoning(&self, enable: bool) {
         self.base.model.lock().await.set_reasoning(enable)
     }
 }
 
 impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
+    /// Remove a tool by name.
     pub async fn unregister_tool(&self, name: &str) {
         self.base.model.lock().await.unregister_tool(name)
     }
 
+    /// Remove all registered tools.
     pub async fn clear_tools(&self) {
         self.base.model.lock().await.clear_tools()
     }
 
+    /// Register tools for the model to call. Use `tools![...]` macro.
     pub async fn register_tools(&self, tools: Vec<Tool>) {
         for tool in tools {
             self.base.model.lock().await.register_tool(tool);
         }
     }
 
+    /// Remove multiple tools.
     pub async fn unregister_tools(&self, tools: Vec<Tool>) {
         for tool in tools {
             self.base.model.lock().await.unregister_tool(&tool.name);
         }
     }
 
+    /// List all registered tools.
     pub async fn registered_tools(&self) -> Vec<Tool> {
         self.base.model.lock().await.registered_tools()
     }
@@ -335,13 +388,13 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
 
         for call in tool_calls {
             let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
-            let tool =
-                tools
-                    .iter()
-                    .find(|t| t.name == call.name)
-                    .ok_or_else(|| TransformersError::Tool(
-                        format!("Tool '{}' not found. Registered tools: {}", call.name, available_tools.join(", "))
-                    ))?;
+            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+                TransformersError::Tool(format!(
+                    "Tool '{}' not found. Registered tools: {}",
+                    call.name,
+                    available_tools.join(", ")
+                ))
+            })?;
 
             let args = call.arguments.clone();
             let mut attempts = 0u32;
@@ -382,10 +435,14 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         Ok(tool_responses)
     }
 
+    /// Generate with tool calling. Model can invoke registered tools.
     pub async fn completion_with_tools<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::Tool("No tools registered. Call register_tools() before completion_with_tools().".to_string()));
+            return Err(TransformersError::Tool(
+                "No tools registered. Call register_tools() before completion_with_tools()."
+                    .to_string(),
+            ));
         }
 
         let mut messages = match input.into() {
@@ -406,7 +463,13 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
                 .base
                 .model_tokenizer
                 .encode(templated.as_str(), true)
-                .map_err(|e| TransformersError::Tokenization(format!("Tokenization failed on '{}...': {}", templated.chars().take(50).collect::<String>(), e)))?
+                .map_err(|e| {
+                    TransformersError::Tokenization(format!(
+                        "Tokenization failed on '{}...': {}",
+                        templated.chars().take(50).collect::<String>(),
+                        e
+                    ))
+                })?
                 .get_ids()
                 .to_vec();
 
@@ -460,6 +523,7 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
         }
     }
 
+    /// Stream generation with tool calling.
     pub async fn completion_stream_with_tools<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
@@ -470,7 +534,10 @@ impl<M: TextGenerationModel + ToolCalling + Send> TextGenerationPipeline<M> {
     > {
         let tools = self.base.model.lock().await.registered_tools();
         if tools.is_empty() {
-            return Err(TransformersError::Tool("No tools registered. Call register_tools() before completion_with_tools().".to_string()));
+            return Err(TransformersError::Tool(
+                "No tools registered. Call register_tools() before completion_with_tools()."
+                    .to_string(),
+            ));
         }
 
         let initial_messages = match input.into() {
@@ -572,4 +639,34 @@ struct RawToolCall {
 struct ToolCallInvocation {
     name: String,
     arguments: serde_json::Value,
+}
+
+#[cfg(test)]
+#[cfg(feature = "cuda")]
+mod cache_tests {
+    use crate::error::Result;
+    use crate::text_generation::{Qwen3Size, TextGenerationPipelineBuilder};
+
+    #[tokio::test]
+    async fn multiple_pipelines_work_independently() -> Result<()> {
+        let mut pipelines = Vec::new();
+        for _ in 0..3 {
+            let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
+                .cuda(0)
+                .temperature(0.7)
+                .max_len(10)
+                .build()
+                .await?;
+            pipelines.push(pipeline);
+        }
+
+        let _ = pipelines[0].completion("Hello").await?;
+        assert!(pipelines[0].base.context_position().await > 0);
+
+        for p in pipelines.iter().skip(1) {
+            assert_eq!(p.base.context_position().await, 0);
+        }
+
+        Ok(())
+    }
 }

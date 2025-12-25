@@ -1,4 +1,4 @@
-#![cfg(feature = "integration")]
+#![cfg(feature = "cuda")]
 
 use transformers::error::{Result, TransformersError};
 use transformers::text_generation::{
@@ -13,7 +13,7 @@ fn get_weather(city: String) -> Result<String> {
 #[tokio::test]
 async fn tool_calling_basic() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-        .cuda_device(0)
+        .cuda(0)
         .seed(42)
         .max_len(150)
         .tool_error_strategy(ErrorStrategy::ReturnToModel)
@@ -39,7 +39,7 @@ fn echo(msg: String) -> String {
 #[tokio::test]
 async fn tool_registration() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-        .cuda_device(0)
+        .cuda(0)
         .seed(0)
         .max_len(20)
         .build()
@@ -65,7 +65,7 @@ fn fail_tool() -> Result<String> {
 #[tokio::test]
 async fn tool_error_fail_strategy() -> Result<()> {
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-        .cuda_device(0)
+        .cuda(0)
         .seed(0)
         .max_len(200)
         .tool_error_strategy(ErrorStrategy::Fail)

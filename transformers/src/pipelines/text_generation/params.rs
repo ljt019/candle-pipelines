@@ -3,15 +3,24 @@ use candle_transformers::generation::{LogitsProcessor as CandleLogitsProcessor, 
 
 pub use candle_transformers::utils::apply_repeat_penalty;
 
+/// Parameters controlling text generation sampling behavior.
 #[derive(Debug, Clone)]
 pub struct GenerationParams {
+    /// Randomness of sampling. 0.0 = deterministic, higher = more random.
     pub temperature: f64,
+    /// Penalty for repeating tokens. 1.0 = no penalty, higher = less repetition.
     pub repeat_penalty: f32,
+    /// Number of recent tokens to consider for repeat penalty.
     pub repeat_last_n: usize,
+    /// Random seed for reproducible generation.
     pub seed: u64,
+    /// Maximum tokens to generate per turn.
     pub max_len: usize,
+    /// Nucleus sampling: only consider tokens with cumulative probability <= p.
     pub top_p: Option<f64>,
+    /// Only consider the top k most likely tokens.
     pub top_k: Option<usize>,
+    /// Filter tokens with probability < min_p * max_probability.
     pub min_p: Option<f64>,
 }
 

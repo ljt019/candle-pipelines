@@ -68,4 +68,7 @@ pub(crate) mod pipeline;
 
 pub use crate::models::ModernBertSize;
 pub use builder::FillMaskPipelineBuilder;
-pub use pipeline::FillMaskPipeline;
+pub use pipeline::{FillMaskPipeline, FillMaskPrediction};
+
+/// Only for generic annotations. Use [`FillMaskPipelineBuilder::modernbert`].
+pub type FillMaskModernBert = crate::models::modernbert::FillMaskModernBertModel;
