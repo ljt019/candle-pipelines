@@ -1,32 +1,3 @@
-[package]
-name = "transformers"
-description = "Transformers provides a simple, intuitive interface for Rust developers who want to work with Large Language Models locally, powered by the Candle crate. It offers an API inspired by Python's Transformers, tailored for Rust developers."
-version = "0.0.12"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ljt019/transformers/"
-
-[dependencies]
-anyhow = "1.0.98"
-minijinja = { version = "2.9.0", features = ["json"] }
-serde = { version = "1.0.219", features = ["derive"] }
-tokenizers = "0.21.1"
-serde_json = "1.0"
-tracing = "0.1.41"
-rand = "0.9.1"
-tool_macro = { path = "./tool_macro", version = "0.1.2" }
-once_cell = "1.20"
-regex = "1"
-futures = "0.3.31"
-async-stream = "0.3.6"
-thiserror = "2.0.12"
-minijinja-contrib = { version = "2.9.0", features = ["pycompat"] }
-aho-corasick = "1.1.3"
-candle-core = { git = "https://github.com/huggingface/candle.git", version = "0.9.1" }
-candle-nn = { git = "https://github.com/huggingface/candle.git", version = "0.9.1" }
-hf-hub = "0.4.3"
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-pin-project-lite = "0.2"
-
-[dev-dependencies]
+[workspace]
+members = ["candle_pipelines", "candle_pipelines_macros"]
+resolver = "2"
