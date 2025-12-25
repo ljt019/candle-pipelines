@@ -1,6 +1,7 @@
 use crate::error::Result;
 use tokenizers::Tokenizer;
 
+/// A vector of tuples each containing a label and a confidence score.
 pub type LabelScores = Vec<(String, f32)>;
 
 pub trait ZeroShotClassificationModel {
