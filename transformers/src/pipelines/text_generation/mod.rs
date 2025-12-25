@@ -45,6 +45,26 @@
 //! # }
 //! ```
 //!
+//! # Generation Parameters
+//!
+//! Configure sampling via the builder:
+//!
+//! ```rust,no_run
+//! # use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+//! # #[tokio::main]
+//! # async fn main() -> transformers::error::Result<()> {
+//! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
+//!     .temperature(0.8)    // randomness (0.0 = deterministic)
+//!     .top_k(50)           // sample from top 50 tokens
+//!     .top_p(0.9)          // nucleus sampling
+//!     .max_len(1024)       // max tokens to generate
+//!     .repeat_penalty(1.1) // discourage repetition
+//!     .build()
+//!     .await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Streaming
 //!
 //! Get tokens as they're generated:
@@ -92,22 +112,29 @@
 //! # }
 //! ```
 //!
-//! # Generation Parameters
+//! # XML Structured Output
 //!
-//! Configure sampling via the builder:
+//! Parse XML tags in model output with [`XmlTextGenerationPipeline`]:
 //!
 //! ```rust,no_run
-//! # use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+//! # use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
 //! # #[tokio::main]
 //! # async fn main() -> transformers::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .temperature(0.8)    // randomness (0.0 = deterministic)
-//!     .top_k(50)           // sample from top 50 tokens
-//!     .top_p(0.9)          // nucleus sampling
-//!     .max_len(1024)       // max tokens to generate
-//!     .repeat_penalty(1.1) // discourage repetition
-//!     .build()
+//!     .build_xml(&["think", "answer"])  // tags to parse
 //!     .await?;
+//!
+//! let events = pipeline.completion("Solve 2+2. Think step by step. Put your final answer in <answer></answer> tags.").await?;
+//!
+//! for event in events {
+//!     match (event.tag(), event.part()) {
+//!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
+//!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
+//!         // Regular content outside of any tags
+//!         (None, TagParts::Content) => print!("{}", event.get_content()),
+//!         _ => {}
+//!     }
+//! }
 //! # Ok(())
 //! # }
 //! ```
