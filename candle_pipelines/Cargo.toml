@@ -4,7 +4,7 @@ description = "Simple, intuitive pipelines for local LLM inference in Rust, powe
 version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0" 
-repository = "https://github.com/ljt019/transformers/"
+repository = "https://github.com/ljt019/candle_pipelines/"
 
 [dependencies]
 minijinja = { version = "2.9.0", features = ["json", "loader"] }
