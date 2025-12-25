@@ -1,15 +1,14 @@
-# transformers v0.0.13
+# candle_pipelines v0.0.1
 
 <!-- CI / Workflow Badges -->
-[<img alt="crates.io" src="https://img.shields.io/crates/v/transformers.svg?style=for-the-badge&color=fc8d62&logo=rust" height="19">](https://crates.io/crates/transformers)
-[<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-transformers-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs" height="19">](https://docs.rs/transformers)
-![CI](https://github.com/ljt019/transformers-rs/actions/workflows/ci.yaml/badge.svg?branch=dev)
-![CD](https://github.com/ljt019/transformers-rs/actions/workflows/cd.yaml/badge.svg?branch=main)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/candle_pipelines.svg?style=for-the-badge&color=fc8d62&logo=rust" height="19">](https://crates.io/crates/candle_pipelines)
+[<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-candle__pipelines-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs" height="19">](https://docs.rs/candle_pipelines)
+![CI](https://github.com/ljt019/transformers-rs/actions/workflows/ci.yml/badge.svg)
 
 > [!warning]
 > ***This crate is under active development. APIs may change as features are still being added, and things tweaked.***
 
-Transformers provides a simple, intuitive interface for Rust developers who want to work with Large Language Models locally, powered by the [Candle](https://github.com/huggingface/candle) crate. It offers an API inspired by Python's [Transformers](https://huggingface.co/docs/transformers), tailored for Rust developers.
+Simple, intuitive pipelines for local LLM inference in Rust, powered by [Candle](https://github.com/huggingface/candle). API inspired by Python's [Transformers](https://huggingface.co/docs/transformers).
 
 ## Available Pipelines
 
@@ -116,7 +115,7 @@ There are two basic ways to generate text:
 Use the `completion` method for straightforward text generation from a single prompt string.
 
 ```rust
-use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -146,7 +145,7 @@ The `Message` struct represents a single message in a chat and has a `role` (sys
 - `Message::assistant(content: &str)`: For model responses.
 
 ```rust
-use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
+use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -178,8 +177,8 @@ Using tools with models is also made extremely easy, you just define tools using
 Using the tools is as easy as calling `completion_with_tools` after having tools registered to the pipeline.
 
 ```rust
-use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, tool, tools};
-use transformers::error::Result;
+use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, tool, tools};
+use candle_pipelines::error::Result;
 
 // 1. Define the tools
 #[tool]
@@ -210,8 +209,8 @@ async fn main() -> anyhow::Result<()> {
 Tools can also be asynchronous, allowing you to perform network or file I/O directly inside the handler:
 
 ```rust
-use transformers::error::Result;
-use transformers::text_generation::tool;
+use candle_pipelines::error::Result;
+use candle_pipelines::text_generation::tool;
 
 #[tool]
 /// Echoes a message after waiting for a bit.
@@ -235,7 +234,7 @@ helpers now return a `Result` to surface any errors that may occur during
 streaming.
 
 ```rust
-use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 use futures::StreamExt;
 use std::io::Write;
 
@@ -267,7 +266,7 @@ async fn main() -> anyhow::Result<()> {
 You can build pipelines with XML parsing capabilities to handle structured outputs from models. This is particularly useful for parsing tool calls, and reasoning traces.
 
 ```rust
-use transformers::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
+use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -307,7 +306,7 @@ The XML parser also works with streaming completions, emitting events as XML tag
 ### Fill Mask (ModernBERT)
 
 ```rust
-use transformers::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
+use candle_pipelines::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 
 fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
@@ -325,7 +324,7 @@ fn main() -> anyhow::Result<()> {
 ### Sentiment Analysis (ModernBERT Finetune)
 
 ```rust
-use transformers::sentiment::{SentimentAnalysisPipelineBuilder, ModernBertSize};
+use candle_pipelines::sentiment::{SentimentAnalysisPipelineBuilder, ModernBertSize};
 
 fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
@@ -349,7 +348,7 @@ Zero-shot classification offers two methods for different use cases:
 Use when you want to classify text into one of several **mutually exclusive** categories. Probabilities sum to 1.0.
 
 ```rust
-use transformers::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
+use candle_pipelines::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
 
 fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline
@@ -379,7 +378,7 @@ fn main() -> anyhow::Result<()> {
 Use when labels can be **independent** and multiple labels could apply to the same text. Returns raw entailment probabilities.
 
 ```rust
-use transformers::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
+use candle_pipelines::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
 
 fn main() -> anyhow::Result<()> {
     // 1. Build the pipeline

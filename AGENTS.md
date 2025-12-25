@@ -12,11 +12,6 @@ Candle provides Rust implementations of models and low-level ML machinery. This 
 
 4. Rust-idiomatic but approachable: Proper Rust patterns, but learnable for devs who just want LLMs without becoming ML experts.
 
-# Candle Reference 
-
-We don't depend on the local version but the entire candle repo is clone into './candle' so you can reference it's source code if you are ever confused whiel working with it or it's apis.
-
-
 # Running Tests
 
 Tests that require CUDA (model loading, inference) are gated behind the `cuda` feature. You can't run these - no GPU available. If you need to test inference code, end your session and tell the user what to run. They'll run it locally and return results.

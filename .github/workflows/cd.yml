@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  publish_tool_macro:
-    name: Publish tool_macro
+  publish_macros:
+    name: Publish candle_pipelines_macros
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
@@ -21,14 +21,14 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=$(grep '^version =' tool_macro/Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+        run: echo "version=$(grep '^version =' candle_pipelines_macros/Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
 
       - name: Publish
         id: publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          cd tool_macro
+          cd candle_pipelines_macros
           if output=$(cargo publish 2>&1); then
             echo "published=true" >> $GITHUB_OUTPUT
           elif echo "$output" | grep -q "already exists"; then
@@ -39,32 +39,32 @@ jobs:
               exit 1
           fi
 
-  publish_transformers:
-    name: Publish transformers
-    needs: publish_tool_macro
+  publish_candle_pipelines:
+    name: Publish candle_pipelines
+    needs: publish_macros
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Update tool_macro dependency
+      - name: Update macros dependency
         run: |
-          VERSION="${{ needs.publish_tool_macro.outputs.version }}"
-          sed -i "s/tool_macro = { path = \"\.\.\/tool_macro\", version = \"[^\"]*\" }/tool_macro = \"$VERSION\"/" transformers/Cargo.toml
+          VERSION="${{ needs.publish_macros.outputs.version }}"
+          sed -i "s/candle_pipelines_macros = { path = \"\.\.\/candle_pipelines_macros\", version = \"[^\"]*\" }/candle_pipelines_macros = \"$VERSION\"/" candle_pipelines/Cargo.toml
 
       - name: Wait for crates.io
-        if: needs.publish_tool_macro.outputs.published == 'true'
+        if: needs.publish_macros.outputs.published == 'true'
         run: sleep 30
 
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish -p transformers
+        run: cargo publish -p candle_pipelines
 
   release:
     name: GitHub Release
-    needs: publish_transformers
+    needs: publish_candle_pipelines
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -73,7 +73,7 @@ jobs:
 
       - name: Get version
         id: version
-        run: echo "version=$(grep '^version =' transformers/Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
+        run: echo "version=$(grep '^version =' candle_pipelines/Cargo.toml | cut -d '"' -f 2)" >> $GITHUB_OUTPUT
 
       - uses: ncipollo/release-action@v1
         with:
