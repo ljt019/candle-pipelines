@@ -517,13 +517,34 @@ impl<M: TextGenerationModel + ToggleableReasoning + Sync> TextGenerationPipeline
     }
 }
 
+/// A tool execution result with name and raw content.
+struct ToolResult {
+    name: String,
+    content: String,
+}
+
+impl ToolResult {
+    /// Format for user output
+    fn for_user(&self) -> String {
+        format!(
+            "<tool_result name=\"{}\">\n{}\n</tool_result>",
+            self.name, self.content
+        )
+    }
+
+    /// Format for model (raw content, template adds wrapping).
+    fn for_model(&self) -> Message {
+        Message::tool(&self.content)
+    }
+}
+
 impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
     async fn execute_tool_calls(
         &self,
         tool_calls: Vec<ToolCallInvocation>,
         tools: &[Tool],
-    ) -> Result<Vec<String>> {
-        let mut tool_responses = Vec::new();
+    ) -> Result<Vec<ToolResult>> {
+        let mut tool_results = Vec::new();
 
         for call in tool_calls {
             let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
@@ -541,11 +562,10 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             loop {
                 match tool.call(args.clone()).await {
                     Ok(result) => {
-                        let trimmed_result = result.trim_end_matches('\n');
-                        tool_responses.push(format!(
-                            "<tool_result name=\"{}\">\n{}\n</tool_result>",
-                            call.name, trimmed_result
-                        ));
+                        tool_results.push(ToolResult {
+                            name: call.name.clone(),
+                            content: result.trim_end_matches('\n').to_string(),
+                        });
                         break;
                     }
                     Err(e) => {
@@ -554,12 +574,10 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                             match &self.tool_error_strategy {
                                 ErrorStrategy::Fail => return Err(e),
                                 ErrorStrategy::ReturnToModel => {
-                                    let error_msg = format!("Error: {e}");
-                                    let trimmed_error = error_msg.trim_end_matches('\n');
-                                    tool_responses.push(format!(
-                                        "<tool_result name=\"{}\">\n{}\n</tool_result>",
-                                        call.name, trimmed_error
-                                    ));
+                                    tool_results.push(ToolResult {
+                                        name: call.name.clone(),
+                                        content: format!("Error: {e}"),
+                                    });
                                     break;
                                 }
                             }
@@ -571,7 +589,7 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             }
         }
 
-        Ok(tool_responses)
+        Ok(tool_results)
     }
 
     /// Internal: tool-calling completion flow
@@ -623,14 +641,19 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                     full_response.push('\n');
                     messages.push(super::message::Message::assistant(&response));
 
-                    let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
-                    let tool_response_text = tool_responses.join("\n");
+                    let tool_results = self.execute_tool_calls(tool_calls, &tools).await?;
 
+                    // Add wrapped results to user output
+                    let user_output: Vec<String> =
+                        tool_results.iter().map(|r| r.for_user()).collect();
                     full_response.push('\n');
-                    full_response.push_str(&tool_response_text);
+                    full_response.push_str(&user_output.join("\n"));
                     full_response.push('\n');
 
-                    messages.push(super::message::Message::user(&tool_response_text));
+                    // Add raw results as tool messages for model
+                    for result in tool_results {
+                        messages.push(result.for_model());
+                    }
                     continue;
                 }
                 _ => {
@@ -692,14 +715,18 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                         messages.push(super::message::Message::assistant(&response_buffer));
                         response_buffer.clear();
 
-                        let tool_responses = self.execute_tool_calls(tool_calls, &tools).await?;
-                        let tool_response_text = tool_responses.join("\n");
+                        let tool_results = self.execute_tool_calls(tool_calls, &tools).await?;
 
-                        yield format!("\n\n{}\n", tool_response_text);
+                        // Yield wrapped results for user output
+                        let user_output: Vec<String> =
+                            tool_results.iter().map(|r| r.for_user()).collect();
+                        yield format!("\n\n{}\n", user_output.join("\n"));
 
-                        messages.push(super::message::Message::user(&tool_response_text));
+                        // Add raw results as tool messages for model
+                        for result in tool_results {
+                            messages.push(result.for_model());
+                        }
                         needs_spacing = true;
-
                     }
                     _ => {
                         break;
