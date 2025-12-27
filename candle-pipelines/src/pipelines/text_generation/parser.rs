@@ -302,11 +302,7 @@ impl XmlParser {
                         new_slice = new_slice.trim_start_matches('\n');
                     }
 
-                    let content_to_emit = if new_slice.trim().is_empty() {
-                        "".to_string()
-                    } else {
-                        new_slice.to_string()
-                    };
+                    let content_to_emit = new_slice.to_string();
 
                     if !content_to_emit.is_empty() {
                         if !state.top_level_open {
@@ -429,7 +425,7 @@ impl XmlParser {
                         if state.emitted_top_len == 0 {
                             slice = slice.trim_start_matches('\n');
                         }
-                        let content_to_emit = if slice.trim().is_empty() {
+                        let content_to_emit = if slice.is_empty() {
                             String::new()
                         } else {
                             let mut content_str = slice.to_string();
@@ -499,7 +495,7 @@ impl XmlParser {
 
             let slice = remaining.trim_start_matches('\n').trim_end_matches('\n');
 
-            let content_to_emit = if slice.trim().is_empty() {
+            let content_to_emit = if slice.is_empty() {
                 String::new()
             } else {
                 let mut content_str = slice.to_string();
