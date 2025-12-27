@@ -1,6 +1,10 @@
 use super::cache::ModelOptions;
 use crate::error::{PipelineError, Result};
+use candle_core::backend::BackendDevice;
 use candle_core::{CudaDevice, Device};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 pub mod builder;
 pub use builder::{BasePipelineBuilder, StandardPipelineBuilder};
@@ -17,13 +21,28 @@ impl DeviceRequest {
         match self {
             DeviceRequest::Cpu => Ok(Device::Cpu),
             DeviceRequest::Cuda(i) => {
-                CudaDevice::new_with_stream(i)
-                    .map(Device::Cuda)
-                    .map_err(|e| {
-                        PipelineError::Device(format!(
-                            "Failed to init CUDA device {i}: {e}. Try CPU as fallback."
-                        ))
-                    })
+                // Cache one CudaDevice per GPU to avoid stream mismatches when
+                // reusing cached models. Synchronize before returning to ensure
+                // any pending operations from previous models are complete.
+                static CUDA_DEVICE_CACHE: Lazy<Mutex<HashMap<usize, CudaDevice>>> =
+                    Lazy::new(|| Mutex::new(HashMap::new()));
+
+                let mut cache = CUDA_DEVICE_CACHE.lock().unwrap();
+                if let Some(dev) = cache.get(&i) {
+                    // Sync stream before reuse to flush any pending ops
+                    dev.synchronize().map_err(|e| {
+                        PipelineError::Device(format!("Failed to sync CUDA device {i}: {e}"))
+                    })?;
+                    return Ok(Device::Cuda(dev.clone()));
+                }
+
+                let dev = CudaDevice::new_with_stream(i).map_err(|e| {
+                    PipelineError::Device(format!(
+                        "Failed to init CUDA device {i}: {e}. Try CPU as fallback."
+                    ))
+                })?;
+                cache.insert(i, dev.clone());
+                Ok(Device::Cuda(dev))
             }
         }
     }

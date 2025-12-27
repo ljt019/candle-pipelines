@@ -277,7 +277,9 @@ impl TextGenerationModel for Gemma3 {
     fn apply_chat_template(
         &self,
         messages: &[crate::pipelines::text_generation::message::Message],
+        _tools: &[crate::pipelines::text_generation::tools::Tool],
     ) -> Result<String> {
+        // Gemma3 doesn't support tool calling, so tools parameter is ignored
         let message_count = messages.len();
 
         let rendered = self

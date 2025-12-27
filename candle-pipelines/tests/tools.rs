@@ -22,7 +22,7 @@ async fn tool_calling_basic() -> Result<()> {
 
     pipeline.register_tools(tools![get_weather]).await;
     let out = pipeline
-        .completion_with_tools("What's the weather like in Paris today?")
+        .completion("What's the weather like in Paris today?")
         .await?;
 
     assert!(out.contains(
@@ -44,6 +44,9 @@ async fn tool_registration() -> Result<()> {
         .max_len(20)
         .build()
         .await?;
+
+    // Clear any tools from previous tests (models are cached and shared)
+    pipeline.clear_tools().await;
 
     pipeline.register_tools(tools![echo]).await;
     assert_eq!(pipeline.registered_tools().await.len(), 1);
@@ -73,7 +76,7 @@ async fn tool_error_fail_strategy() -> Result<()> {
         .await?;
 
     pipeline.register_tools(tools![fail_tool]).await;
-    let res = pipeline.completion_with_tools("call fail_tool").await;
+    let res = pipeline.completion("call fail_tool").await;
     assert!(res.is_err());
     Ok(())
 }

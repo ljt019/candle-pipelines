@@ -12,17 +12,11 @@ pub enum ErrorStrategy {
     ReturnToModel,
 }
 
-/// Trait for types that support tool registration and execution.
-pub trait ToolCalling {
-    /// Register a tool for use during generation.
-    fn register_tool(&mut self, tool: Tool);
-    /// Remove a tool by name. No-op if not found.
-    fn unregister_tool(&mut self, name: &str);
-    /// Remove all registered tools.
-    fn clear_tools(&mut self);
-    /// Returns a list of all registered tools.
-    fn registered_tools(&self) -> Vec<Tool>;
-}
+/// Marker trait for models that support tool calling.
+/// 
+/// Models implementing this trait can parse `<tool_call>` tags and generate
+/// tool invocations. Tool storage and management is handled by the pipeline.
+pub trait ToolCalling {}
 
 /// Future type returned by tool functions.
 pub type ToolFuture = BoxFuture<'static, Result<String>>;

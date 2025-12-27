@@ -8,7 +8,7 @@ use tokenizers::Tokenizer;
 use tokio::sync::Mutex;
 
 pub struct BasePipeline<M: TextGenerationModel> {
-    pub model: Arc<Mutex<M>>,
+    pub model: Arc<M>,
     pub model_tokenizer: Tokenizer,
     pub context: Arc<Mutex<M::Context>>,
     pub gen_params: Arc<Mutex<GenerationParams>>,
@@ -17,9 +17,9 @@ pub struct BasePipeline<M: TextGenerationModel> {
     pub last_generation_stats: std::sync::Arc<std::sync::Mutex<Option<GenerationStats>>>,
 }
 
-impl<M: TextGenerationModel> BasePipeline<M> {
+impl<M: TextGenerationModel + Sync> BasePipeline<M> {
     pub async fn new(
-        model: M,
+        model: Arc<M>,
         gen_params: GenerationParams,
         device: candle_core::Device,
     ) -> Result<Self> {
@@ -38,7 +38,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         special_strings.insert("<|im_sep|>".to_string());
 
         Ok(Self {
-            model: Arc::new(Mutex::new(model)),
+            model,
             model_tokenizer,
             context: Arc::new(Mutex::new(context)),
             gen_params: Arc::new(Mutex::new(gen_params)),
@@ -46,10 +46,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             last_processed_tokens: Arc::new(Mutex::new(Vec::new())),
             last_generation_stats: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
-    }
-
-    pub async fn context_position(&self) -> usize {
-        self.context.lock().await.position()
     }
 
     pub fn last_generation_stats(&self) -> Option<GenerationStats> {
@@ -82,8 +78,6 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         input_tokens: &[u32],
         prompt_token_count: usize,
     ) -> Result<(String, GenerationStats)> {
-        const CHUNK_SIZE: usize = 64;
-
         let params = self.gen_params.lock().await.clone();
 
         let mut logits_processor = initialize_logits_processor(&params, params.seed);
@@ -92,26 +86,20 @@ impl<M: TextGenerationModel> BasePipeline<M> {
         let mut stats = GenerationStats::new();
         stats.set_prompt_tokens(prompt_token_count);
 
-        let mut idx = 0;
-        let mut last_logits = None;
-        while idx < input_tokens.len() {
-            let end = usize::min(idx + CHUNK_SIZE, input_tokens.len());
-            let chunk = &input_tokens[idx..end];
+        // Process entire prompt at once to avoid candle dtype bug in Gemma3's
+        // mask function when index_pos > 0 and seq_len > 1 (happens with chunking)
+        let input = Tensor::new(input_tokens, &self.device)?.unsqueeze(0)?;
+        let logits = {
+            let mut ctx = self.context.lock().await;
+            ctx.generate(&input)
+        }?;
+        let last_logits = logits.squeeze(0)?;
 
-            let input = Tensor::new(chunk, &self.device)?.unsqueeze(0)?;
-            let logits = {
-                let mut ctx = self.context.lock().await;
-                ctx.generate(&input)
-            }?;
-            last_logits = Some(logits.squeeze(0)?);
-            idx = end;
-        }
-
-        let mut next_token = logits_processor.sample(&last_logits.expect("missing logits"))?;
+        let mut next_token = logits_processor.sample(&last_logits)?;
         generated_tokens.push(next_token);
         stats.record_token();
 
-        let eos_tokens = self.model.lock().await.get_eos_tokens();
+        let eos_tokens = self.model.get_eos_tokens();
         if eos_tokens.is_empty() {
             return Err(PipelineError::Unexpected(
                 "No EOS tokens configured for model. Cannot determine when to stop.".to_string(),
@@ -143,7 +131,7 @@ impl<M: TextGenerationModel> BasePipeline<M> {
             stats.record_token();
         }
 
-        let eos_tokens = self.model.lock().await.get_eos_tokens();
+        let eos_tokens = self.model.get_eos_tokens();
         let filtered_tokens: Vec<u32> = generated_tokens
             .into_iter()
             .filter(|&token| !eos_tokens.contains(&token))
@@ -191,37 +179,29 @@ impl<M: TextGenerationModel> BasePipeline<M> {
 
         let stream = async_stream::try_stream! {
             let params = gen_params.lock().await.clone();
-            let eos_tokens = model.lock().await.get_eos_tokens();
+            let eos_tokens = model.get_eos_tokens();
             if eos_tokens.is_empty() {
                 Err(PipelineError::Unexpected(
                     "No EOS tokens configured for model. Cannot determine when to stop.".to_string(),
                 ))?;
             }
-            const CHUNK_SIZE: usize = 64;
-
+            // Process entire prompt at once to avoid candle dtype bug in Gemma3's
+            // mask function when index_pos > 0 and seq_len > 1 (happens with chunking)
             let mut logits_processor =
                 initialize_logits_processor(&params, params.seed);
 
-            let mut idx = 0;
-            let mut last_logits = None;
-            while idx < input_tokens.len() {
-                let end = usize::min(idx + CHUNK_SIZE, input_tokens.len());
-                let chunk = &input_tokens[idx..end];
-
-                let input = Tensor::new(chunk, &device)?.unsqueeze(0)?;
-                let logits = {
-                    let mut ctx = context.lock().await;
-                    ctx.generate(&input)
-                }?;
-                last_logits = Some(logits.squeeze(0)?);
-                idx = end;
-            }
+            let input = Tensor::new(input_tokens.as_slice(), &device)?.unsqueeze(0)?;
+            let logits = {
+                let mut ctx = context.lock().await;
+                ctx.generate(&input)
+            }?;
+            let last_logits = logits.squeeze(0)?;
 
             let mut generated: Vec<u32> = Vec::with_capacity(params.max_len);
 
             let mut dec_full = tokenizer.decode_stream(false);
 
-            let mut next_token = logits_processor.sample(&last_logits.expect("missing logits"))?;
+            let mut next_token = logits_processor.sample(&last_logits)?;
             generated.push(next_token);
             stats_clone.lock().unwrap().record_token();
 

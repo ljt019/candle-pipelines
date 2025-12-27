@@ -52,16 +52,29 @@ pub enum TagParts {
     End,
 }
 
+/// An event emitted during XML stream parsing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// Content within a registered XML tag.
     Tagged {
+        /// The tag being parsed.
         tag: Tag,
+        /// Which part of the tag (start, content, end).
         part: TagParts,
+        /// The content/text.
         content: String,
     },
+    /// Content outside any registered tags (plain output).
     Output {
+        /// Which part of the output (start, content, end).
         part: TagParts,
+        /// The content/text.
         content: String,
+    },
+    /// An error occurred in the underlying stream.
+    Error {
+        /// The error message.
+        message: String,
     },
 }
 
@@ -105,25 +118,52 @@ impl Event {
         Self::tagged(tag, TagParts::Content, content)
     }
 
+    /// Create an error event.
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Error {
+            message: message.into(),
+        }
+    }
+
+    /// Returns true if this is an error event.
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error { .. })
+    }
+
+    /// Get the error message if this is an error event.
+    pub fn error_message(&self) -> Option<&str> {
+        match self {
+            Self::Error { message } => Some(message),
+            _ => None,
+        }
+    }
+
+    /// Get the content/text of this event.
     pub fn get_content(&self) -> &str {
         match self {
             Self::Tagged { content, .. } | Self::Output { content, .. } => content,
+            Self::Error { message } => message,
         }
     }
 
+    /// Get the tag name if this is a tagged event.
     pub fn tag(&self) -> Option<&str> {
         match self {
             Self::Tagged { tag, .. } => Some(tag.name()),
-            Self::Output { .. } => None,
+            Self::Output { .. } | Self::Error { .. } => None,
         }
     }
 
+    /// Get which part of the tag/output this event represents.
     pub fn part(&self) -> TagParts {
         match self {
             Self::Tagged { part, .. } | Self::Output { part, .. } => *part,
+            Self::Error { .. } => TagParts::End, // Error terminates
         }
     }
 
+    /// Parse this event as a tool call if it's a complete `<tool_call>` end event.
+    /// Returns `(name, arguments)` if successful.
     pub fn parse_tool_call(&self) -> Option<(String, serde_json::Value)> {
         let tag = self.tag()?;
         if tag != "tool_call" || self.part() != TagParts::End {
@@ -145,6 +185,16 @@ impl Event {
     }
 }
 
+/// Builder for creating an [`XmlParser`] with specific tags to track.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let parser = XmlParserBuilder::new()
+///     .register_tag("think")
+///     .register_tag("answer")
+///     .build();
+/// ```
 #[derive(Debug, Default)]
 pub struct XmlParserBuilder {
     tags: Vec<String>,
@@ -152,21 +202,20 @@ pub struct XmlParserBuilder {
 }
 
 impl XmlParserBuilder {
+    /// Create a new builder with no registered tags.
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register_tag(&mut self, tag: impl Into<String>) -> Tag {
+    /// Register a tag name for the parser to track. Returns self for chaining.
+    pub fn register_tag(mut self, tag: impl Into<String>) -> Self {
         let name = tag.into();
-        let tag_handle = Tag {
-            name: name.clone(),
-            id: self.next_id,
-        };
         self.next_id += 1;
         self.tags.push(name);
-        tag_handle
+        self
     }
 
+    /// Build the parser with all registered tags.
     pub fn build(self) -> XmlParser {
         let mut tag_map = HashMap::new();
         let mut tags_set = HashSet::new();
@@ -192,6 +241,10 @@ struct ParserState {
     last_content_had_newline: bool,
 }
 
+/// Streaming XML parser for extracting structured content from LLM output.
+///
+/// Parses text containing XML-like tags and emits events for tag boundaries
+/// and content. Useful for structured output like `<think>...</think>` blocks.
 #[derive(Debug, Clone)]
 pub struct XmlParser {
     registered_tags: HashSet<String>,
@@ -200,6 +253,7 @@ pub struct XmlParser {
 }
 
 impl XmlParser {
+    /// Create a new parser for the specified tags.
     pub fn new(tags: HashSet<String>, tag_map: HashMap<String, Tag>) -> Self {
         Self {
             registered_tags: tags,
@@ -208,10 +262,12 @@ impl XmlParser {
         }
     }
 
+    /// Reset parser state for a new parsing session.
     pub fn reset(&self) {
         *self.state.lock().expect("parser lock poisoned") = ParserState::default();
     }
 
+    /// Parse a complete text string and return all events.
     pub fn parse_complete(&self, text: &str) -> Vec<Event> {
         self.reset();
         let mut events = Vec::new();
@@ -225,6 +281,7 @@ impl XmlParser {
         events
     }
 
+    /// Parse a single token in streaming mode. Call `flush()` when done.
     pub fn parse_token(&self, token: &str) -> Vec<Event> {
         let mut events = Vec::new();
 
@@ -432,6 +489,7 @@ impl XmlParser {
         }
     }
 
+    /// Flush any remaining buffered content as events.
     pub fn flush(&self) -> Vec<Event> {
         let mut state = self.state.lock().expect("parser lock poisoned");
         let mut events = Vec::new();
@@ -499,8 +557,110 @@ impl XmlParser {
         events
     }
 
+    /// Returns the set of tag names this parser recognizes.
     pub fn registered_tags(&self) -> &HashSet<String> {
         &self.registered_tags
+    }
+
+    /// Wrap a token stream to produce XML parsing events.
+    ///
+    /// Use this to compose XML parsing with any text generation stream:
+    ///
+    /// ```rust,ignore
+    /// let parser = XmlParserBuilder::new().register_tag("think").build();
+    /// let token_stream = pipeline.completion_stream("...").await?;
+    /// let mut event_stream = parser.wrap_stream(token_stream);
+    ///
+    /// while let Some(event) = event_stream.next().await {
+    ///     match (event.tag(), event.part()) {
+    ///         (Some("think"), TagParts::Content) => println!("[thinking] {}", event.get_content()),
+    ///         (None, TagParts::Content) => print!("{}", event.get_content()),
+    ///         _ => {}
+    ///     }
+    /// }
+    /// ```
+    pub fn wrap_stream<S>(&self, stream: S) -> EventStream<S>
+    where
+        S: futures::Stream<Item = crate::error::Result<String>> + Send,
+    {
+        EventStream::new(self.clone(), stream)
+    }
+}
+
+/// Stream of XML parsing events.
+///
+/// Wraps a token stream and parses XML tags as they arrive.
+/// Has inherent methods like `.next()` - no need to import `StreamExt`.
+pub struct EventStream<S> {
+    parser: XmlParser,
+    inner: std::pin::Pin<Box<S>>,
+    buffer: Vec<Event>,
+    flushed: bool,
+}
+
+impl<S> EventStream<S> {
+    fn new(parser: XmlParser, stream: S) -> Self {
+        parser.reset();
+        Self {
+            parser,
+            inner: Box::pin(stream),
+            buffer: Vec::new(),
+            flushed: false,
+        }
+    }
+
+    /// Get the next event from the stream.
+    pub async fn next(&mut self) -> Option<Event>
+    where
+        S: futures::Stream<Item = crate::error::Result<String>>,
+    {
+        use futures::StreamExt;
+
+        // Return buffered events first
+        if !self.buffer.is_empty() {
+            return Some(self.buffer.remove(0));
+        }
+
+        // Get more tokens and parse
+        while let Some(result) = self.inner.as_mut().next().await {
+            match result {
+                Ok(token) => {
+                    let events = self.parser.parse_token(&token);
+                    if !events.is_empty() {
+                        self.buffer.extend(events);
+                        return Some(self.buffer.remove(0));
+                    }
+                }
+                Err(e) => {
+                    // Emit error as event instead of silently breaking
+                    return Some(Event::error(e.to_string()));
+                }
+            }
+        }
+
+        // Flush remaining events
+        if !self.flushed {
+            self.flushed = true;
+            let events = self.parser.flush();
+            if !events.is_empty() {
+                self.buffer.extend(events);
+                return Some(self.buffer.remove(0));
+            }
+        }
+
+        None
+    }
+
+    /// Collect all events into a vector.
+    pub async fn collect(mut self) -> Vec<Event>
+    where
+        S: futures::Stream<Item = crate::error::Result<String>>,
+    {
+        let mut events = Vec::new();
+        while let Some(event) = self.next().await {
+            events.push(event);
+        }
+        events
     }
 }
 
@@ -510,9 +670,7 @@ mod tests {
 
     #[test]
     fn test_basic_parsing() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world</think>Regular content";
         let events = parser.parse_complete(text);
@@ -534,9 +692,7 @@ mod tests {
 
     #[test]
     fn test_unregistered_tags() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Registered</think><other>Not registered</other>";
         let events = parser.parse_complete(text);
@@ -558,9 +714,7 @@ mod tests {
 
     #[test]
     fn test_malformed_xml() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Unclosed tag content";
         let events = parser.parse_complete(text);
@@ -576,9 +730,7 @@ mod tests {
 
     #[test]
     fn test_self_closing_tag_ignored() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think/>Hello";
         let events = parser.parse_complete(text);
@@ -594,9 +746,7 @@ mod tests {
 
     #[test]
     fn test_tag_with_attributes() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think answer=\"yes\">Content</think>";
         let events = parser.parse_complete(text);
@@ -612,10 +762,10 @@ mod tests {
 
     #[test]
     fn test_nested_registered_tags() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        builder.register_tag("inner");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new()
+            .register_tag("think")
+            .register_tag("inner")
+            .build();
 
         let text = "<think>hi<inner>there</inner>end</think>";
         let events = parser.parse_complete(text);
@@ -639,9 +789,7 @@ mod tests {
 
     #[test]
     fn test_parse_token_equivalent_to_complete() {
-        let mut builder = XmlParserBuilder::new();
-        builder.register_tag("think");
-        let parser = builder.build();
+        let parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello</think>";
         let expected = parser.parse_complete(text);

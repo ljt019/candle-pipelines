@@ -2,6 +2,7 @@ use crate::error::Result;
 use candle_core::{Device, Tensor};
 
 use super::message::Message;
+use super::tools::Tool;
 
 pub trait LanguageModelContext: Send {
     fn generate(&mut self, input: &Tensor) -> candle_core::Result<Tensor>;
@@ -22,7 +23,9 @@ pub trait TextGenerationModel {
 
     async fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer>;
 
-    fn apply_chat_template(&self, messages: &[Message]) -> Result<String>;
+    /// Apply chat template to messages. Tools are included in the prompt if
+    /// the model supports tool calling and tools are provided.
+    fn apply_chat_template(&self, messages: &[Message], tools: &[Tool]) -> Result<String>;
 
     fn get_eos_token(&self) -> Option<u32>;
 
@@ -43,9 +46,11 @@ pub trait TextGenerationModel {
     }
 }
 
-#[allow(dead_code)]
+/// Marker trait for models that produce reasoning/thinking output.
 pub trait Reasoning {}
 
-pub trait ToggleableReasoning {
-    fn set_reasoning(&mut self, enable: bool);
+/// Trait for models where reasoning can be toggled on/off.
+pub trait ToggleableReasoning: Reasoning {
+    /// Enable or disable reasoning mode.
+    fn enable_reasoning(&self, enable: bool);
 }

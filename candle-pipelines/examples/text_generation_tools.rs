@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
         .await;
 
     let mut stream = pipeline
-        .completion_stream_with_tools("What's the temp and humidity like in Tokyo?")
+        .completion_stream("What's the temp and humidity like in Tokyo?")
         .await?;
 
     println!("\n=== Generation with Both Tools ===");
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     pipeline.unregister_tools(tools![get_temperature]).await;
 
     let mut stream = pipeline
-        .completion_stream_with_tools("What's the temp and humidity like in Tokyo?")
+        .completion_stream("What's the temp and humidity like in Tokyo?")
         .await?;
 
     println!("\n\n=== Generation with Only Humidity Tool ===");

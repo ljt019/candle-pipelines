@@ -1,6 +1,7 @@
 use super::{build_cache_key, DeviceRequest};
 use crate::error::Result;
 use crate::pipelines::cache::{global_cache, ModelOptions};
+use std::sync::Arc;
 
 pub trait BasePipelineBuilder<M>: Sized
 where
@@ -26,11 +27,15 @@ where
 
         let key = build_cache_key(self.options(), &device);
 
+        // get_or_create returns Arc<M>, unwrap to M for these simpler pipelines
         let model = global_cache().get_or_create(&key, || {
             Self::create_model(self.options().clone(), device.clone())
         })?;
 
         let tokenizer = Self::get_tokenizer(self.options().clone())?;
+
+        // These pipelines take ownership - Arc::try_unwrap if sole owner, else clone
+        let model = Arc::try_unwrap(model).unwrap_or_else(|arc| (*arc).clone());
 
         Self::construct_pipeline(model, tokenizer)
     }

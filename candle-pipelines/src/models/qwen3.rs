@@ -79,14 +79,26 @@ impl crate::pipelines::cache::ModelOptions for Qwen3Size {
 use crate::loaders::{GgufModelLoader, TokenizerLoader};
 
 /// Only for generic annotations. Use [`TextGenerationPipelineBuilder::qwen3`](crate::text_generation::TextGenerationPipelineBuilder::qwen3).
-#[derive(Clone)]
 pub struct Qwen3 {
     weights: Arc<candle_qwen3::ModelWeights>,
     info: ModelInfo,
-    reasoning: bool,
+    reasoning: std::sync::atomic::AtomicBool,
     generation_config: crate::loaders::GenerationConfig,
-    tools: Vec<crate::pipelines::text_generation::tools::Tool>,
     chat_template_env: Arc<Environment<'static>>,
+}
+
+impl Clone for Qwen3 {
+    fn clone(&self) -> Self {
+        Self {
+            weights: self.weights.clone(),
+            info: self.info.clone(),
+            reasoning: std::sync::atomic::AtomicBool::new(
+                self.reasoning.load(std::sync::atomic::Ordering::SeqCst),
+            ),
+            generation_config: self.generation_config.clone(),
+            chat_template_env: self.chat_template_env.clone(),
+        }
+    }
 }
 
 impl Qwen3 {
@@ -186,9 +198,8 @@ impl Qwen3 {
         Ok(Self {
             weights,
             info,
-            reasoning: true,
+            reasoning: std::sync::atomic::AtomicBool::new(true),
             generation_config,
-            tools: Vec::new(),
             chat_template_env,
         })
     }
@@ -264,7 +275,7 @@ pub struct ModelInfo {
 }
 
 use crate::pipelines::text_generation::model::{
-    LanguageModelContext, TextGenerationModel, ToggleableReasoning,
+    LanguageModelContext, Reasoning, TextGenerationModel, ToggleableReasoning,
 };
 use crate::pipelines::text_generation::tools::ToolCalling;
 
@@ -317,8 +328,9 @@ impl TextGenerationModel for Qwen3 {
     fn apply_chat_template(
         &self,
         messages: &[crate::pipelines::text_generation::message::Message],
+        tools: &[crate::pipelines::text_generation::tools::Tool],
     ) -> Result<String> {
-        let mut enable_thinking = self.reasoning;
+        let mut enable_thinking = self.reasoning.load(std::sync::atomic::Ordering::SeqCst);
         if let Some(last_user_msg) = messages
             .iter()
             .rev()
@@ -362,7 +374,7 @@ impl TextGenerationModel for Qwen3 {
                 messages => messages_dicts,
                 add_generation_prompt => true,
                 enable_thinking => enable_thinking,
-                tools => self.registered_tools(),
+                tools => tools,
             })
             .map_err(|e| {
                 PipelineError::Unexpected(format!(
@@ -397,34 +409,13 @@ impl TextGenerationModel for Qwen3 {
     }
 }
 
+impl Reasoning for Qwen3 {}
+
 impl ToggleableReasoning for Qwen3 {
-    fn set_reasoning(&mut self, enable: bool) {
-        self.reasoning = enable;
+    fn enable_reasoning(&self, enable: bool) {
+        self.reasoning
+            .store(enable, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
-use crate::pipelines::text_generation::tools::Tool;
-
-impl ToolCalling for Qwen3 {
-    fn register_tool(&mut self, tool: Tool) {
-        if let Some(pos) = self.tools.iter().position(|t| t.name() == tool.name()) {
-            self.tools[pos] = tool;
-        } else {
-            self.tools.push(tool);
-        }
-    }
-
-    fn unregister_tool(&mut self, name: &str) {
-        if let Some(pos) = self.tools.iter().position(|t| t.name() == name) {
-            self.tools.remove(pos);
-        }
-    }
-
-    fn clear_tools(&mut self) {
-        self.tools.clear();
-    }
-
-    fn registered_tools(&self) -> Vec<Tool> {
-        self.tools.clone()
-    }
-}
+impl ToolCalling for Qwen3 {}

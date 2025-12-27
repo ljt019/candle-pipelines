@@ -6,9 +6,7 @@ use crate::pipelines::cache::{global_cache, ModelOptions};
 use crate::pipelines::utils::{build_cache_key, DeviceRequest};
 
 use super::model::TextGenerationModel;
-use super::parser::XmlParserBuilder;
 use super::pipeline::TextGenerationPipeline;
-use super::xml_pipeline::XmlTextGenerationPipeline;
 
 crate::pipelines::utils::impl_device_methods!(direct: TextGenerationPipelineBuilder<M: TextGenerationModel>);
 
@@ -116,7 +114,7 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
     /// Build the pipeline, downloading and loading the model if needed.
     pub async fn build(self) -> Result<TextGenerationPipeline<M>>
     where
-        M: Clone + Send + Sync + 'static,
+        M: Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
     {
         let device = self.device_request.resolve()?;
@@ -131,38 +129,6 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
             .await?;
 
         TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy).await
-    }
-
-    /// Build an XML-parsing pipeline that extracts specified tags from output.
-    pub async fn build_xml(self, tags: &[&str]) -> Result<XmlTextGenerationPipeline<M>>
-    where
-        M: Clone + Send + Sync + 'static,
-        M::Options: ModelOptions + Clone,
-    {
-        let device = self.device_request.resolve()?;
-        let cache_key = build_cache_key(&self.model_options, &device);
-
-        let options = self.model_options.clone();
-        let device_for_model = device.clone();
-        let model = global_cache()
-            .get_or_create_async(&cache_key, || async move {
-                M::new(options, device_for_model).await
-            })
-            .await?;
-
-        let mut builder = XmlParserBuilder::new();
-        for tag in tags {
-            builder.register_tag(*tag);
-        }
-        let xml_parser = builder.build();
-        XmlTextGenerationPipeline::new(
-            model,
-            self.gen_params,
-            xml_parser,
-            device,
-            self.tool_error_strategy,
-        )
-        .await
     }
 }
 

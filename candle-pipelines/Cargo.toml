@@ -5,6 +5,7 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0" 
 repository = "https://github.com/ljt019/candle-pipelines/"
+readme = "../README.md"
 
 [dependencies]
 minijinja = { version = "2.9.0", features = ["json", "loader"] }

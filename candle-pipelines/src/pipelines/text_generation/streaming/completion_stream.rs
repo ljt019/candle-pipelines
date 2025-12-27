@@ -90,6 +90,19 @@ impl<S> CompletionStream<S> {
     pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
         self.stats.lock().unwrap().clone()
     }
+
+    /// Convert to a boxed stream for type unification.
+    pub fn boxed<'a>(
+        self,
+    ) -> CompletionStream<Pin<Box<dyn Stream<Item = Result<String>> + Send + 'a>>>
+    where
+        S: Stream<Item = Result<String>> + Send + 'a,
+    {
+        CompletionStream {
+            inner: Box::pin(self.inner),
+            stats: self.stats,
+        }
+    }
 }
 
 impl<S> Stream for CompletionStream<S>

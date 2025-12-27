@@ -106,7 +106,7 @@
 //! pipeline.register_tools(tools![get_weather]).await;
 //!
 //! let response = pipeline
-//!     .completion_with_tools("What's the weather in Tokyo?")
+//!     .completion("What's the weather in Tokyo?")
 //!     .await?;
 //! # Ok(())
 //! # }
@@ -114,23 +114,33 @@
 //!
 //! # XML Structured Output
 //!
-//! Parse XML tags in model output with [`XmlTextGenerationPipeline`]:
+//! Parse XML tags in streaming output with [`XmlParser`]:
 //!
 //! ```rust,no_run
-//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts};
+//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts, XmlParserBuilder};
+//! use futures::StreamExt;
+//! use std::pin::pin;
+//!
 //! # #[tokio::main]
 //! # async fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build_xml(&["think", "answer"])  // tags to parse
+//!     .build()
 //!     .await?;
 //!
-//! let events = pipeline.completion("Solve 2+2. Think step by step. Put your final answer in <answer></answer> tags.").await?;
+//! // Create parser for specific tags
+//! let parser = XmlParserBuilder::new()
+//!     .register_tag("think")
+//!     .register_tag("answer")
+//!     .build();
 //!
-//! for event in events {
+//! // Wrap the token stream with XML parsing (must be pinned)
+//! let stream = pipeline.completion_stream("Solve 2+2. Think step by step.").await?;
+//! let mut event_stream = pin!(parser.wrap_stream(stream));
+//!
+//! while let Some(event) = event_stream.next().await {
 //!     match (event.tag(), event.part()) {
 //!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
 //!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
-//!         // Regular content outside of any tags
 //!         (None, TagParts::Content) => print!("{}", event.get_content()),
 //!         _ => {}
 //!     }
@@ -158,7 +168,6 @@ pub(crate) mod pipeline;
 pub(crate) mod stats;
 pub(crate) mod streaming;
 pub(crate) mod tools;
-pub(crate) mod xml_pipeline;
 
 // For tool_macro
 #[doc(hidden)]
@@ -172,8 +181,11 @@ pub use crate::models::{Gemma3, Gemma3Size, Qwen3, Qwen3Size};
 pub use builder::TextGenerationPipelineBuilder;
 pub use candle_pipelines_macros::{tool, tools};
 pub use message::Message;
+pub use model::{Reasoning, ToggleableReasoning};
 pub use params::GenerationParams;
-pub use parser::TagParts;
-pub use pipeline::TextGenerationPipeline;
-pub use tools::{ErrorStrategy, Tool};
-pub use xml_pipeline::XmlTextGenerationPipeline;
+pub use parser::{Event, EventStream, TagParts, XmlParser, XmlParserBuilder};
+pub use pipeline::{
+    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedFuture, BoxedStream,
+    TextGeneration, TextGenerationPipeline,
+};
+pub use tools::{ErrorStrategy, Tool, ToolCalling};

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Procedural macros for candle_pipelines crate"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ljt019/candle-pipelines/"
+readme = "README.md"
 
 [lib]
 proc-macro = true
