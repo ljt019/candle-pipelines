@@ -8,6 +8,8 @@ pub enum Role {
     User,
     /// A response from the assistant/model.
     Assistant,
+    /// A tool/function result returned to the model.
+    Tool,
 }
 
 impl Role {
@@ -17,6 +19,7 @@ impl Role {
             Role::System => "system",
             Role::User => "user",
             Role::Assistant => "assistant",
+            Role::Tool => "tool",
         }
     }
 }
@@ -55,6 +58,14 @@ impl Message {
     pub fn assistant(content: &str) -> Self {
         Self {
             role: Role::Assistant,
+            content: content.to_string(),
+        }
+    }
+
+    /// Helper to construct a tool result message.
+    pub fn tool(content: &str) -> Self {
+        Self {
+            role: Role::Tool,
             content: content.to_string(),
         }
     }
