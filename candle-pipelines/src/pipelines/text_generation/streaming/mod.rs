@@ -1,3 +1,3 @@
-pub mod completion_stream;
+pub mod tokens;
 
-pub use completion_stream::CompletionStream;
+pub use tokens::Tokens;

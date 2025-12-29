@@ -10,34 +10,54 @@ fn main() -> Result<()> {
     println!("Pipeline built successfully.");
 
     let text = "I love my new car";
-    let candidate_labels = vec!["coding", "reading", "writing", "speaking", "cars"];
+    let candidate_labels = &["coding", "reading", "writing", "speaking", "cars"];
 
-    // Single-label classification: probabilities sum to 1 (mutually exclusive)
-    println!("\n=== Single-label Classification (classify) ===");
-    println!("Use this when you want to classify text into one of several mutually exclusive categories.");
-    println!("Probabilities will sum to 1.0, representing confidence that the text belongs to each category.\n");
+    // Single-label classification - direct access to predictions!
+    println!("\n=== Single-label Classification ===");
+    println!("Probabilities sum to 1.0.\n");
 
-    let single_label_result = pipeline.classify(text, &candidate_labels)?;
+    let output = pipeline.run(text, candidate_labels)?;
+
     println!("Text: \"{}\"", text);
-    println!("Single-label results:");
-    for result in &single_label_result {
-        println!("  - {}: {:.4}", result.label, result.score);
+    println!("Results:");
+    for pred in &output.predictions {
+        println!("  - {}: {:.4}", pred.label, pred.score);
     }
+    println!(
+        "Completed in {:.2}ms",
+        output.stats.total_time.as_secs_f64() * 1000.0
+    );
 
     // Verify probabilities sum to 1
-    let sum: f32 = single_label_result.iter().map(|r| r.score).sum();
+    let sum: f32 = output.predictions.iter().map(|p| p.score).sum();
     println!("  Total probability: {:.4}\n", sum);
 
-    // Multi-label classification: raw entailment probabilities (independent labels)
-    println!("=== Multi-label Classification (classify_multi_label) ===");
-    println!("Use this when labels can be independent and multiple labels could apply.");
-    println!("Returns raw entailment probabilities for each label independently.\n");
+    // Multi-label classification
+    println!("=== Multi-label Classification ===");
+    println!("Independent probabilities.\n");
 
-    let multi_label_result = pipeline.classify_multi_label(text, &candidate_labels)?;
+    let output = pipeline.run_multi_label(text, candidate_labels)?;
+
     println!("Text: \"{}\"", text);
-    println!("Multi-label results:");
-    for result in &multi_label_result {
-        println!("  - {}: {:.4}", result.label, result.score);
+    println!("Results:");
+    for pred in &output.predictions {
+        println!("  - {}: {:.4}", pred.label, pred.score);
+    }
+
+    // Batch inference - results include input text!
+    println!("\n=== Batch Inference ===");
+    let texts = &[
+        "The team won the championship!",
+        "New smartphone released today",
+        "Senate passes new legislation",
+    ];
+    let labels = &["sports", "technology", "politics"];
+
+    let output = pipeline.run(texts, labels)?;
+
+    for r in output.results {
+        let top = &r.predictions?[0];
+        println!("{} → {} ({:.2})", r.text, top.label, top.score);
     }
 
     Ok(())

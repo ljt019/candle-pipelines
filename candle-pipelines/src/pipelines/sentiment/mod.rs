@@ -10,17 +10,17 @@
 //!
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
-//! let result = pipeline.predict("I absolutely love this product!")?;
 //!
-//! // sentiment: positive (confidence: 0.98)
-//! println!("sentiment: {} (confidence: {:.2})", result.label, result.score);
+//! // Single text - direct access
+//! let output = pipeline.run("I absolutely love this product!")?;
+//! println!("sentiment: {} (confidence: {:.2})", output.prediction.label, output.prediction.score);
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! # Batch Inference
 //!
-//! Analyze multiple texts efficiently:
+//! Analyze multiple texts at once (returns `BatchOutput`):
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::sentiment::{SentimentAnalysisPipelineBuilder, ModernBertSize};
@@ -32,11 +32,11 @@
 //!     "It's okay, nothing special.",
 //! ];
 //!
-//! let results = pipeline.predict_batch(reviews)?;
+//! let output = pipeline.run(reviews)?;
 //!
-//! for (text, result) in reviews.iter().zip(results) {
-//!     let r = result?;
-//!     println!("{}: {} ({:.2})", text, r.label, r.score);
+//! for r in output.results {
+//!     let p = r.prediction?;
+//!     println!("{}: {} ({:.2})", r.text, p.label, p.score);
 //! }
 //! # Ok(())
 //! # }
@@ -59,8 +59,12 @@ pub(crate) mod pipeline;
 // ============ Public API ============
 
 pub use crate::models::ModernBertSize;
+pub use crate::pipelines::stats::PipelineStats;
 pub use builder::SentimentAnalysisPipelineBuilder;
-pub use pipeline::{SentimentAnalysisPipeline, SentimentResult};
+pub use pipeline::{BatchOutput, BatchResult, Output, Prediction, SentimentAnalysisPipeline};
+
+#[doc(hidden)]
+pub use pipeline::SentimentInput;
 
 /// Only for generic annotations. Use [`SentimentAnalysisPipelineBuilder::modernbert`].
 pub type SentimentModernBert = crate::models::modernbert::SentimentModernBertModel;

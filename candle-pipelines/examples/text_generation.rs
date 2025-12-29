@@ -1,8 +1,7 @@
 use candle_pipelines::error::Result;
 use candle_pipelines::text_generation::{Message, Qwen3Size, TextGenerationPipelineBuilder};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     println!("Building pipeline...");
 
     // Start by creating the pipeline, using the builder to configure any generation parameters.
@@ -11,18 +10,21 @@ async fn main() -> Result<()> {
         .temperature(0.7)
         .top_k(40)
         .max_len(1024)
-        .build()
-        .await?;
+        .build()?;
 
     println!("Pipeline built successfully.");
 
-    // Get a completion from a prompt.
-    let completion = pipeline
-        .completion("Explain the concept of Large Language Models in simple terms.")
-        .await?;
+    // Get a completion from a prompt - returns Output { text, stats }
+    let output = pipeline.run("Explain the concept of Large Language Models in simple terms.")?;
 
     println!("\n=== Generated Text ===");
-    println!("{}", completion);
+    println!("{}", output.text);
+    println!(
+        "\n[{} tokens in {:.2}s ({:.1} tok/s)]",
+        output.stats.tokens_generated,
+        output.stats.total_time.as_secs_f64(),
+        output.stats.tokens_per_second
+    );
 
     // Create and use messages for your completions to keep a conversation going.
     let mut messages = vec![
@@ -30,38 +32,20 @@ async fn main() -> Result<()> {
         Message::user("What is the capital of France?"),
     ];
 
-    let completion = pipeline.completion(&messages).await?;
+    let output = pipeline.run(&messages)?;
 
     println!("\n=== Generated Text 2 ===");
-    println!("{}", completion);
+    println!("{}", output.text);
 
     // To continue the conversation, add the response to the messages
-    messages.push(Message::assistant(&completion));
+    messages.push(Message::assistant(&output.text));
     messages.push(Message::user("What are some fun things to do there?"));
 
     // Now ask a follow-up question.
-    let completion = pipeline.completion(&messages).await?;
+    let output = pipeline.run(&messages)?;
 
     println!("\n=== Generated Text 3 (Follow-up) ===");
-    println!("{}", completion);
-
-    // Batch inference: process multiple prompts at once
-    println!("\n=== Batch Inference ===");
-    let prompts = &[
-        "What is the capital of France?",
-        "Explain quantum computing in one sentence.",
-        "Write a haiku about Rust programming.",
-    ];
-
-    let results = pipeline.completion_batch(prompts).await?;
-
-    for (i, result) in results.into_iter().enumerate() {
-        println!("\n[Prompt {}]: {}", i + 1, prompts[i]);
-        match result {
-            Ok(completion) => println!("[Response]: {}", completion),
-            Err(e) => println!("[Error]: {}", e),
-        }
-    }
+    println!("{}", output.text);
 
     Ok(())
 }

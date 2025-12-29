@@ -1,6 +1,13 @@
 use crate::error::Result;
 use tokenizers::Tokenizer;
 
+/// Internal prediction type used by model trait.
+#[derive(Debug, Clone)]
+pub struct FillMaskPrediction {
+    pub word: String,
+    pub score: f32,
+}
+
 pub trait FillMaskModel {
     type Options: std::fmt::Debug + Clone;
 
@@ -22,12 +29,12 @@ pub trait FillMaskModel {
         tokenizer: &Tokenizer,
         text: &str,
         k: usize,
-    ) -> Result<Vec<super::pipeline::FillMaskPrediction>> {
+    ) -> Result<Vec<FillMaskPrediction>> {
         if k == 0 {
             return Ok(vec![]);
         }
         let filled = self.predict(tokenizer, text)?;
-        Ok(vec![super::pipeline::FillMaskPrediction {
+        Ok(vec![FillMaskPrediction {
             word: filled.trim().to_string(),
             score: 1.0,
         }])
@@ -38,7 +45,7 @@ pub trait FillMaskModel {
         tokenizer: &Tokenizer,
         texts: &[&str],
         k: usize,
-    ) -> Result<Vec<Result<Vec<super::pipeline::FillMaskPrediction>>>> {
+    ) -> Result<Vec<Result<Vec<FillMaskPrediction>>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict_top_k(tokenizer, text, k))

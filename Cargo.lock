@@ -314,13 +314,14 @@ dependencies = [
 
 [[package]]
 name = "candle-pipelines"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "aho-corasick",
  "async-stream",
  "candle-core",
  "candle-nn",
  "candle-pipelines-macros",
+ "candle-pipelines-models",
  "candle-transformers",
  "futures",
  "hf-hub",
@@ -352,6 +353,16 @@ dependencies = [
  "schemars 1.1.0",
  "serde_json",
  "syn",
+]
+
+[[package]]
+name = "candle-pipelines-models"
+version = "0.0.1"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "tracing",
 ]
 
 [[package]]

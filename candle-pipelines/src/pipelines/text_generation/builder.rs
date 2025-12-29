@@ -17,13 +17,13 @@ crate::pipelines::utils::impl_device_methods!(direct: TextGenerationPipelineBuil
 /// ```rust,no_run
 /// use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 ///
-/// # async fn example() -> candle_pipelines::error::Result<()> {
+/// # fn example() -> candle_pipelines::error::Result<()> {
+/// // Use .build() for sync or .build_async() for async model loading
 /// let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 ///     .temperature(0.7)
 ///     .top_p(0.9)
 ///     .max_len(512)
-///     .build()
-///     .await?;
+///     .build()?;
 /// # Ok(())
 /// # }
 /// ```
@@ -111,8 +111,29 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         self
     }
 
-    /// Build the pipeline, downloading and loading the model if needed.
-    pub async fn build(self) -> Result<TextGenerationPipeline<M>>
+    /// Build the pipeline synchronously, downloading and loading the model if needed.
+    ///
+    /// Uses `ureq` for HTTP requests. For async builds with `reqwest`, use [`build_async`](Self::build_async).
+    pub fn build(self) -> Result<TextGenerationPipeline<M>>
+    where
+        M: Send + Sync + 'static,
+        M::Options: ModelOptions + Clone,
+    {
+        let device = self.device_request.resolve()?;
+        let cache_key = build_cache_key(&self.model_options, &device);
+
+        let options = self.model_options.clone();
+        let device_for_model = device.clone();
+        let model =
+            global_cache().get_or_create(&cache_key, || M::new(options, device_for_model))?;
+
+        TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy)
+    }
+
+    /// Build the pipeline asynchronously, downloading and loading the model if needed.
+    ///
+    /// Uses `reqwest` for HTTP requests. For sync builds with `ureq`, use [`build`](Self::build).
+    pub async fn build_async(self) -> Result<TextGenerationPipeline<M>>
     where
         M: Send + Sync + 'static,
         M::Options: ModelOptions + Clone,
@@ -124,11 +145,11 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
         let device_for_model = device.clone();
         let model = global_cache()
             .get_or_create_async(&cache_key, || async move {
-                M::new(options, device_for_model).await
+                M::new_async(options, device_for_model).await
             })
             .await?;
 
-        TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy).await
+        TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy)
     }
 }
 

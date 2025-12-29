@@ -57,6 +57,14 @@ impl GenerationStats {
         }
     }
 
+    /// Accumulate stats from another generation (for multi-turn tool calling).
+    /// Adds token counts; time_to_first_token is preserved from the first call.
+    pub(crate) fn accumulate(&mut self, other: &GenerationStats) {
+        self.prompt_tokens += other.prompt_tokens;
+        self.tokens_generated += other.tokens_generated;
+        // Keep first token time from initial call
+    }
+
     #[cfg(test)]
     pub(crate) fn override_times(
         &mut self,

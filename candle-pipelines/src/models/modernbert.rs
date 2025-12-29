@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use tokenizers::Tokenizer;
 
 use crate::error::{PipelineError, Result};
-use crate::pipelines::fill_mask::pipeline::FillMaskPrediction;
-use crate::pipelines::sentiment::pipeline::SentimentResult;
+use crate::pipelines::fill_mask::model::FillMaskPrediction;
+use crate::pipelines::sentiment::model::SentimentResult;
 use crate::pipelines::zero_shot::model::LabelScores;
 
 /// Available ModernBERT model sizes.

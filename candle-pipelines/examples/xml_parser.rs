@@ -9,15 +9,13 @@ fn get_weather(city: String) -> Result<String> {
     Ok(format!("The weather in {} is sunny.", city))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Build a regular pipeline
+fn main() -> Result<()> {
+    // Build a regular pipeline - fully sync, no async runtime needed
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(1024)
-        .build()
-        .await?;
+        .build()?;
 
-    pipeline.register_tools(tools![get_weather]).await;
+    pipeline.register_tools(tools![get_weather]);
 
     // Create XML parser for specific tags
     let parser = XmlParserBuilder::new()
@@ -26,16 +24,14 @@ async fn main() -> Result<()> {
         .register_tag("tool_call")
         .build();
 
-    // Generate streaming completion (auto-uses tools if enabled)
-    let stream = pipeline
-        .completion_stream("What's the weather like in Tokyo?")
-        .await?;
+    // Generate streaming completion
+    let stream = pipeline.run_iter("What's the weather like in Tokyo?")?;
 
-    // Wrap stream with XML parser
-    let mut event_stream = parser.wrap_stream(stream);
+    // Wrap iterator with XML parser
+    let event_iter = parser.wrap_iterator(stream);
 
     println!("\n--- Generated Events ---");
-    while let Some(event) = event_stream.next().await {
+    for event in event_iter {
         match event.tag() {
             Some("think") => match event.part() {
                 TagParts::Start => println!("[THINKING]"),

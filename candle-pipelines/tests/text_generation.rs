@@ -12,11 +12,11 @@ async fn text_generation_basic() -> Result<()> {
         .seed(42)
         .temperature(0.7)
         .max_len(8)
-        .build()
+        .build_async()
         .await?;
 
-    let out = pipeline.completion("Rust is a").await?;
-    assert!(!out.trim().is_empty());
+    let out = pipeline.run("Rust is a")?;
+    assert!(!out.text.trim().is_empty());
     Ok(())
 }
 
@@ -26,12 +26,12 @@ async fn text_generation_streaming() -> Result<()> {
         .cuda(0)
         .seed(42)
         .max_len(8)
-        .build()
+        .build_async()
         .await?;
 
-    let mut stream = pipeline.completion_stream("Hello").await?;
+    let stream = pipeline.run_iter("Hello")?;
     let mut acc = String::new();
-    while let Some(tok) = stream.next().await {
+    for tok in stream {
         acc.push_str(&tok?);
     }
     assert!(!acc.trim().is_empty());
@@ -44,16 +44,16 @@ async fn text_generation_params_update() -> Result<()> {
         .cuda(0)
         .seed(42)
         .max_len(1)
-        .build()
+        .build_async()
         .await?;
 
-    let short = pipeline.completion("Rust is a").await?;
+    let short = pipeline.run("Rust is a")?;
 
     let mut new_params = GenerationParams::default();
     new_params.max_len = 8;
-    pipeline.set_generation_params(new_params).await;
+    pipeline.set_generation_params(new_params);
 
-    let longer = pipeline.completion("Rust is a").await?;
-    assert!(longer.len() >= short.len());
+    let longer = pipeline.run("Rust is a")?;
+    assert!(longer.text.len() >= short.text.len());
     Ok(())
 }

@@ -12,11 +12,12 @@
 //! let pipeline = ZeroShotClassificationPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 //! let labels = &["sports", "politics", "technology", "entertainment"];
 //!
-//! let results = pipeline.classify("The team won the championship game!", labels)?;
+//! // Single text - direct access to predictions Vec
+//! let output = pipeline.run("The team won the championship game!", labels)?;
 //!
 //! // sports: 0.87, entertainment: 0.08, politics: 0.03, technology: 0.02
-//! for r in results {
-//!     println!("{}: {:.2}", r.label, r.score);
+//! for p in &output.predictions {
+//!     println!("{}: {:.2}", p.label, p.score);
 //! }
 //! # Ok(())
 //! # }
@@ -24,9 +25,9 @@
 //!
 //! # Single-Label vs Multi-Label
 //!
-//! **Single-label** (`classify`): Scores sum to 1.0 - use when categories are mutually exclusive.
+//! **Single-label** (`run`): Scores sum to 1.0 - use when categories are mutually exclusive.
 //!
-//! **Multi-label** (`classify_multi_label`): Independent probabilities - use when multiple labels can apply.
+//! **Multi-label** (`run_multi_label`): Independent probabilities - use when multiple labels can apply.
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
@@ -35,15 +36,21 @@
 //! let labels = &["urgent", "billing", "technical"];
 //!
 //! // This email could be both urgent AND billing-related
-//! let results = pipeline.classify_multi_label(
+//! let output = pipeline.run_multi_label(
 //!     "URGENT: Your payment failed, please update your card immediately!",
 //!     labels,
 //! )?;
+//!
+//! for p in &output.predictions {
+//!     println!("{}: {:.2}", p.label, p.score);
+//! }
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! # Batch Inference
+//!
+//! Batch returns `BatchOutput` with nested Vec:
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::zero_shot::{ZeroShotClassificationPipelineBuilder, ModernBertSize};
@@ -52,7 +59,12 @@
 //! let texts = &["Great goal by Messi!", "New iPhone announced", "Senate passes bill"];
 //! let labels = &["sports", "tech", "politics"];
 //!
-//! let results = pipeline.classify_batch(texts, labels)?;
+//! let output = pipeline.run(texts, labels)?;
+//!
+//! for r in output.results {
+//!     let top = &r.predictions?[0];
+//!     println!("{} → {}: {:.2}", r.text, top.label, top.score);
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -74,9 +86,12 @@ pub(crate) mod pipeline;
 // ============ Public API ============
 
 pub use crate::models::ModernBertSize;
+pub use crate::pipelines::stats::PipelineStats;
 pub use builder::ZeroShotClassificationPipelineBuilder;
-pub use model::LabelScores;
-pub use pipeline::{ClassificationResult, ZeroShotClassificationPipeline};
+pub use pipeline::{BatchOutput, BatchResult, Output, Prediction, ZeroShotClassificationPipeline};
+
+#[doc(hidden)]
+pub use pipeline::ZeroShotInput;
 
 /// Only for generic annotations. Use [`ZeroShotClassificationPipelineBuilder::modernbert`].
 pub type ZeroShotModernBert = crate::models::modernbert::ZeroShotModernBertModel;
