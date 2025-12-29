@@ -192,8 +192,8 @@ impl LayerWeights {
                 if index_pos == 0 {
                     (k, v)
                 } else {
-                    let k = Tensor::cat(&[k_cache.as_ref(), &k], 2)?;
-                    let v = Tensor::cat(&[v_cache.as_ref(), &v], 2)?;
+                    let k = Tensor::cat(&[&*k_cache, &k], 2)?;
+                    let v = Tensor::cat(&[&*v_cache, &v], 2)?;
                     (k, v)
                 }
             }

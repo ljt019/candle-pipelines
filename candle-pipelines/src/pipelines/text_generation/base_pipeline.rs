@@ -271,7 +271,10 @@ impl<M: TextGenerationModel + Send + Sync> TokenIterator<M> {
         }?;
         let logits = logits.squeeze(0)?;
 
-        let start_at = self.generated.len().saturating_sub(self.params.repeat_last_n);
+        let start_at = self
+            .generated
+            .len()
+            .saturating_sub(self.params.repeat_last_n);
         let penalty_context = &self.generated[start_at..];
 
         let logits = if self.params.repeat_penalty <= 1. || penalty_context.is_empty() {

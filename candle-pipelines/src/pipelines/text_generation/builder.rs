@@ -124,9 +124,8 @@ impl<M: TextGenerationModel> TextGenerationPipelineBuilder<M> {
 
         let options = self.model_options.clone();
         let device_for_model = device.clone();
-        let model = global_cache().get_or_create(&cache_key, || {
-            M::new(options, device_for_model)
-        })?;
+        let model =
+            global_cache().get_or_create(&cache_key, || M::new(options, device_for_model))?;
 
         TextGenerationPipeline::new(model, self.gen_params, device, self.tool_error_strategy)
     }

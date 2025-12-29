@@ -24,11 +24,7 @@ pub trait SentimentAnalysisModel {
             .collect())
     }
 
-    fn predict_with_score(
-        &self,
-        tokenizer: &Tokenizer,
-        text: &str,
-    ) -> Result<SentimentResult> {
+    fn predict_with_score(&self, tokenizer: &Tokenizer, text: &str) -> Result<SentimentResult> {
         let label = self.predict(tokenizer, text)?;
         Ok(SentimentResult { label, score: 1.0 })
     }

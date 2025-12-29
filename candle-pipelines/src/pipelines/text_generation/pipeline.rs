@@ -586,27 +586,26 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             let max_seq_len = self.base.model.get_max_seq_len();
             let pending_tokens = new_tokens.len();
 
-            let (response, stats) = if self.base.cache.lock().unwrap().current_seq_len()
-                + pending_tokens
-                > max_seq_len
-            {
-                self.base.cache.lock().unwrap().reset();
-                self.base.last_processed_tokens.lock().unwrap().clear();
-                self.base.completion_from_tokens_with_stats(&new_tokens)?
-            } else if self.base.can_reuse_cache(&new_tokens) {
-                let prefix_len = self.base.last_processed_tokens.lock().unwrap().len();
-                let new_portion = &new_tokens[prefix_len..];
-                let res = self
-                    .base
-                    .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())?;
-                *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
-                res
-            } else {
-                self.base.cache.lock().unwrap().reset();
-                let res = self.base.completion_from_tokens_with_stats(&new_tokens)?;
-                *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
-                res
-            };
+            let (response, stats) =
+                if self.base.cache.lock().unwrap().current_seq_len() + pending_tokens > max_seq_len
+                {
+                    self.base.cache.lock().unwrap().reset();
+                    self.base.last_processed_tokens.lock().unwrap().clear();
+                    self.base.completion_from_tokens_with_stats(&new_tokens)?
+                } else if self.base.can_reuse_cache(&new_tokens) {
+                    let prefix_len = self.base.last_processed_tokens.lock().unwrap().len();
+                    let new_portion = &new_tokens[prefix_len..];
+                    let res = self
+                        .base
+                        .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                } else {
+                    self.base.cache.lock().unwrap().reset();
+                    let res = self.base.completion_from_tokens_with_stats(&new_tokens)?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                };
 
             // Accumulate stats from this generation
             if is_first_call {

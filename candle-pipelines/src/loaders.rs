@@ -32,11 +32,9 @@ impl HfLoader {
 
     /// Synchronously load file from HuggingFace Hub (uses ureq).
     pub fn load(&self) -> Result<PathBuf> {
-        let hf_api = hf_hub::api::sync::ApiBuilder::new()
-            .build()
-            .map_err(|e| {
-                PipelineError::Download(format!("Failed to initialize HuggingFace API: {e}"))
-            })?;
+        let hf_api = hf_hub::api::sync::ApiBuilder::new().build().map_err(|e| {
+            PipelineError::Download(format!("Failed to initialize HuggingFace API: {e}"))
+        })?;
         let hf_api = hf_api.model(self.repo.clone());
 
         let max_retries = 3;
