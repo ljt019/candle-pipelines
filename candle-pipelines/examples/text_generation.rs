@@ -7,12 +7,12 @@ async fn main() -> Result<()> {
 
     // Start by creating the pipeline, using the builder to configure any generation parameters.
     // Parameters are optional, defaults are set to good values for each model.
+    // Use .build() for sync or .build_async() for async model loading.
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .temperature(0.7)
         .top_k(40)
         .max_len(1024)
-        .build()
-        .await?;
+        .build()?;
 
     println!("Pipeline built successfully.");
 

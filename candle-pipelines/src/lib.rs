@@ -15,4 +15,4 @@ pub(crate) mod pipelines;
 
 pub mod error;
 
-pub use pipelines::{fill_mask, reader, sentiment, text_generation, zero_shot};
+pub use pipelines::{fill_mask, sentiment, text_generation, zero_shot};

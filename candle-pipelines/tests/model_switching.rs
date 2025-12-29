@@ -12,7 +12,7 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
     let gemma1 = TextGenerationPipelineBuilder::gemma3(Gemma3Size::Size1B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = gemma1.completion("Say hello in one word.").await?;
@@ -23,7 +23,7 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
     let qwen = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = qwen.completion("Say hello in one word.").await?;
@@ -34,7 +34,7 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
     let gemma2 = TextGenerationPipelineBuilder::gemma3(Gemma3Size::Size1B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = gemma2.completion("Say hello in one word.").await?;
@@ -49,7 +49,7 @@ async fn gemma_gemma_switch() -> Result<()> {
     let gemma1 = TextGenerationPipelineBuilder::gemma3(Gemma3Size::Size1B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = gemma1.completion("Say hi.").await?;
@@ -61,7 +61,7 @@ async fn gemma_gemma_switch() -> Result<()> {
     let gemma2 = TextGenerationPipelineBuilder::gemma3(Gemma3Size::Size1B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = gemma2.completion("Say hi.").await?;
@@ -76,7 +76,7 @@ async fn qwen_qwen_switch() -> Result<()> {
     let qwen1 = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = qwen1.completion("Say hi.").await?;
@@ -87,7 +87,7 @@ async fn qwen_qwen_switch() -> Result<()> {
     let qwen2 = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size4B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = qwen2.completion("Say hi.").await?;
@@ -104,7 +104,7 @@ async fn qwen_same_model_reload() -> Result<()> {
     let qwen1 = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = qwen1.completion("Say hi.").await?;
@@ -116,7 +116,7 @@ async fn qwen_same_model_reload() -> Result<()> {
     let qwen2 = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .cuda(0)
         .max_len(50)
-        .build()
+        .build_async()
         .await?;
 
     let response = qwen2.completion("Say hi.").await?;

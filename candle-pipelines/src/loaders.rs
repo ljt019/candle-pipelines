@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tokio::time::Duration;
+use std::time::Duration;
 
 use crate::error::{PipelineError, Result};
 
@@ -30,15 +30,52 @@ impl HfLoader {
         }
     }
 
-    pub async fn load(&self) -> Result<PathBuf> {
+    /// Synchronously load file from HuggingFace Hub (uses ureq).
+    pub fn load(&self) -> Result<PathBuf> {
+        let hf_api = hf_hub::api::sync::ApiBuilder::new()
+            .build()
+            .map_err(|e| {
+                PipelineError::Download(format!("Failed to initialize HuggingFace API: {e}"))
+            })?;
+        let hf_api = hf_api.model(self.repo.clone());
+
+        let max_retries = 3;
+        let mut attempts = 0u32;
+
+        for attempt in 0..max_retries {
+            match hf_api.get(&self.filename) {
+                Ok(path) => return Ok(path),
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    attempts = attempt + 1;
+                    if error_msg.contains("Lock acquisition failed") && attempt < max_retries - 1 {
+                        let wait_time = Duration::from_millis(100 * (1 << attempt));
+                        std::thread::sleep(wait_time);
+                        continue;
+                    }
+                    return Err(PipelineError::Download(format!(
+                        "Failed to download '{}' from '{}': {}",
+                        self.filename, self.repo, error_msg
+                    )));
+                }
+            }
+        }
+
+        Err(PipelineError::Download(format!(
+            "Download timed out for '{}' from '{}' after {} attempt(s)",
+            self.filename, self.repo, attempts
+        )))
+    }
+
+    /// Asynchronously load file from HuggingFace Hub (uses reqwest).
+    pub async fn load_async(&self) -> Result<PathBuf> {
         let hf_api = hf_hub::api::tokio::ApiBuilder::new()
             .with_chunk_size(None)
             .build()
             .map_err(|e| {
                 PipelineError::Download(format!("Failed to initialize HuggingFace API: {e}"))
             })?;
-        let hf_repo = self.repo.clone();
-        let hf_api = hf_api.model(hf_repo);
+        let hf_api = hf_api.model(self.repo.clone());
 
         let max_retries = 3;
         let mut attempts = 0u32;
@@ -83,8 +120,8 @@ impl TokenizerLoader {
         }
     }
 
-    pub async fn load(&self) -> Result<Tokenizer> {
-        let tokenizer_file_path = self.tokenizer_file_loader.load().await?;
+    pub fn load(&self) -> Result<Tokenizer> {
+        let tokenizer_file_path = self.tokenizer_file_loader.load()?;
         let path_str = tokenizer_file_path.display().to_string();
 
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_file_path).map_err(|e| {
@@ -124,10 +161,8 @@ impl GenerationConfigLoader {
         }
     }
 
-    pub async fn load(&self) -> Result<GenerationConfig> {
-        let generation_config_file_path = self.generation_config_file_loader.load().await?;
-
-        let generation_config_content = std::fs::read_to_string(generation_config_file_path)?;
+    fn parse_config(path: std::path::PathBuf) -> Result<GenerationConfig> {
+        let generation_config_content = std::fs::read_to_string(path)?;
 
         let raw: RawGenerationConfig = serde_json::from_str(&generation_config_content)?;
 
@@ -163,6 +198,16 @@ impl GenerationConfigLoader {
             eos_token_ids,
         })
     }
+
+    pub fn load(&self) -> Result<GenerationConfig> {
+        let path = self.generation_config_file_loader.load()?;
+        Self::parse_config(path)
+    }
+
+    pub async fn load_async(&self) -> Result<GenerationConfig> {
+        let path = self.generation_config_file_loader.load_async().await?;
+        Self::parse_config(path)
+    }
 }
 
 #[derive(Clone)]
@@ -177,15 +222,25 @@ impl GgufModelLoader {
         Self { model_file_loader }
     }
 
-    pub async fn load(
-        &self,
+    fn parse_gguf(
+        model_file_path: std::path::PathBuf,
     ) -> Result<(std::fs::File, candle_core::quantized::gguf_file::Content)> {
-        let model_file_path = self.model_file_loader.load().await?;
-
         let mut file = std::fs::File::open(&model_file_path)?;
         let file_content = candle_core::quantized::gguf_file::Content::read(&mut file)
             .map_err(|e| e.with_path(model_file_path))?;
 
         Ok((file, file_content))
+    }
+
+    pub fn load(&self) -> Result<(std::fs::File, candle_core::quantized::gguf_file::Content)> {
+        let model_file_path = self.model_file_loader.load()?;
+        Self::parse_gguf(model_file_path)
+    }
+
+    pub async fn load_async(
+        &self,
+    ) -> Result<(std::fs::File, candle_core::quantized::gguf_file::Content)> {
+        let model_file_path = self.model_file_loader.load_async().await?;
+        Self::parse_gguf(model_file_path)
     }
 }

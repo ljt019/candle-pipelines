@@ -558,16 +558,16 @@ impl XmlParser {
         &self.registered_tags
     }
 
-    /// Wrap a token stream to produce XML parsing events.
+    /// Wrap a token iterator to produce XML parsing events.
     ///
-    /// Use this to compose XML parsing with any text generation stream:
+    /// Use this to compose XML parsing with any text generation iterator:
     ///
     /// ```rust,ignore
     /// let parser = XmlParserBuilder::new().register_tag("think").build();
-    /// let token_stream = pipeline.completion_stream("...").await?;
-    /// let mut event_stream = parser.wrap_stream(token_stream);
+    /// let token_iter = pipeline.completion_stream("...")?;
+    /// let mut event_iter = parser.wrap_iterator(token_iter);
     ///
-    /// while let Some(event) = event_stream.next().await {
+    /// for event in event_iter {
     ///     match (event.tag(), event.part()) {
     ///         (Some("think"), TagParts::Content) => println!("[thinking] {}", event.get_content()),
     ///         (None, TagParts::Content) => print!("{}", event.get_content()),
@@ -575,6 +575,16 @@ impl XmlParser {
     ///     }
     /// }
     /// ```
+    pub fn wrap_iterator<I>(&self, iter: I) -> EventIterator<I>
+    where
+        I: Iterator<Item = crate::error::Result<String>>,
+    {
+        EventIterator::new(self.clone(), iter)
+    }
+
+    /// Wrap a token stream to produce XML parsing events (async version).
+    ///
+    /// Use this for async streams like those from the reader pipeline.
     pub fn wrap_stream<S>(&self, stream: S) -> EventStream<S>
     where
         S: futures::Stream<Item = crate::error::Result<String>> + Send,
@@ -657,6 +667,71 @@ impl<S> EventStream<S> {
             events.push(event);
         }
         events
+    }
+}
+
+/// Sync iterator of XML parsing events.
+///
+/// Wraps a token iterator and parses XML tags as they arrive.
+pub struct EventIterator<I> {
+    parser: XmlParser,
+    inner: I,
+    buffer: Vec<Event>,
+    flushed: bool,
+}
+
+impl<I> EventIterator<I> {
+    fn new(parser: XmlParser, iter: I) -> Self {
+        parser.reset();
+        Self {
+            parser,
+            inner: iter,
+            buffer: Vec::new(),
+            flushed: false,
+        }
+    }
+}
+
+impl<I> Iterator for EventIterator<I>
+where
+    I: Iterator<Item = crate::error::Result<String>>,
+{
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Return buffered events first
+        if !self.buffer.is_empty() {
+            return Some(self.buffer.remove(0));
+        }
+
+        // Get more tokens and parse
+        for result in self.inner.by_ref() {
+            match result {
+                Ok(token) => {
+                    let events = self.parser.parse_token(&token);
+                    if !events.is_empty() {
+                        self.buffer.extend(events);
+                        return Some(self.buffer.remove(0));
+                    }
+                }
+                Err(e) => {
+                    // Emit error as event instead of silently breaking
+                    return Some(Event::error(e.to_string()));
+                }
+            }
+        }
+
+        // Flush remaining events
+        if !self.flushed {
+            self.flushed = true;
+            let events = self.parser.flush();
+            if !events.is_empty() {
+                self.buffer.extend(events);
+                return Some(self.buffer.remove(0));
+            }
+        }
+
+        None
     }
 }
 

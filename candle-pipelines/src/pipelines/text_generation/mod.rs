@@ -10,9 +10,9 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> candle_pipelines::error::Result<()> {
+//! // Use .build() for sync or .build_async() for async model loading
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
 //! let response = pipeline.completion("Explain quantum computing briefly.").await?;
 //! println!("{}", response);
@@ -28,7 +28,7 @@
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
 //! # #[tokio::main]
 //! # async fn main() -> candle_pipelines::error::Result<()> {
-//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build().await?;
+//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
 //! let mut messages = vec![
 //!     Message::system("You are a helpful assistant."),
 //!     Message::user("What is Rust?"),
@@ -51,32 +51,29 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 //!     .temperature(0.8)    // randomness (0.0 = deterministic)
 //!     .top_k(50)           // sample from top 50 tokens
 //!     .top_p(0.9)          // nucleus sampling
 //!     .max_len(1024)       // max tokens to generate
 //!     .repeat_penalty(1.1) // discourage repetition
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! # Streaming
 //!
-//! Get tokens as they're generated:
+//! Streaming is fully sync - no async runtime needed:
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
-//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build().await?;
-//! let mut stream = pipeline.completion_stream("Write a poem about Rust.").await?;
+//! # fn main() -> candle_pipelines::error::Result<()> {
+//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
+//! let stream = pipeline.completion_stream("Write a poem about Rust.")?;
 //!
-//! while let Some(token) = stream.next().await {
+//! for token in stream {
 //!     print!("{}", token?);
 //! }
 //! # Ok(())
@@ -100,10 +97,9 @@
 //! # #[tokio::main]
 //! # async fn main() -> Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
-//! pipeline.register_tools(tools![get_weather]).await;
+//! pipeline.register_tools(tools![get_weather]);
 //!
 //! let response = pipeline
 //!     .completion("What's the weather in Tokyo?")
@@ -118,14 +114,9 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts, XmlParserBuilder};
-//! use futures::StreamExt;
-//! use std::pin::pin;
-//!
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
 //! // Create parser for specific tags
 //! let parser = XmlParserBuilder::new()
@@ -133,11 +124,11 @@
 //!     .register_tag("answer")
 //!     .build();
 //!
-//! // Wrap the token stream with XML parsing (must be pinned)
-//! let stream = pipeline.completion_stream("Solve 2+2. Think step by step.").await?;
-//! let mut event_stream = pin!(parser.wrap_stream(stream));
+//! // Wrap the token iterator with XML parsing
+//! let stream = pipeline.completion_stream("Solve 2+2. Think step by step.")?;
+//! let event_iter = parser.wrap_iterator(stream);
 //!
-//! while let Some(event) = event_stream.next().await {
+//! for event in event_iter {
 //!     match (event.tag(), event.part()) {
 //!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
 //!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
@@ -183,9 +174,9 @@ pub use candle_pipelines_macros::{tool, tools};
 pub use message::Message;
 pub use model::{Reasoning, ToggleableReasoning};
 pub use params::GenerationParams;
-pub use parser::{Event, EventStream, TagParts, XmlParser, XmlParserBuilder};
+pub use parser::{Event, EventIterator, EventStream, TagParts, XmlParser, XmlParserBuilder};
 pub use pipeline::{
-    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedFuture, BoxedStream,
+    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedFuture, BoxedIterator,
     TextGeneration, TextGenerationPipeline,
 };
 pub use tools::{ErrorStrategy, Tool, ToolCalling};

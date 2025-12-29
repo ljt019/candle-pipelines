@@ -3,7 +3,6 @@
 pub(crate) mod gemma3;
 pub(crate) mod modernbert;
 pub(crate) mod qwen3;
-pub(crate) mod readerlm_v2;
 
 // ============ Public API ============
 
