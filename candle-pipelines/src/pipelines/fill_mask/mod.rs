@@ -10,10 +10,10 @@
 //!
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
-//! let prediction = pipeline.predict("The [MASK] of France is Paris.")?;
 //!
-//! // prediction: capital (confidence: 0.99)
-//! println!("prediction: {} (confidence: {:.2})", prediction.word, prediction.score);
+//! // Single text - direct access to prediction
+//! let output = pipeline.run("The [MASK] of France is Paris.")?;
+//! println!("{}: {:.2}", output.prediction.token, output.prediction.score);
 //! # Ok(())
 //! # }
 //! ```
@@ -26,10 +26,10 @@
 //! # use candle_pipelines::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! # let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
-//! let top_3 = pipeline.predict_top_k("I love my [MASK] car.", 3)?;
+//! let output = pipeline.run_top_k("I love my [MASK] car.", 3)?;
 //!
-//! for p in top_3 {
-//!     println!("{}: {:.2}", p.word, p.score);
+//! for pred in &output.predictions {
+//!     println!("{}: {:.2}", pred.token, pred.score);
 //! }
 //! # Ok(())
 //! # }
@@ -37,15 +37,17 @@
 //!
 //! # Batch Inference
 //!
-//! Process multiple texts efficiently:
+//! Process multiple texts at once (returns `BatchOutput`):
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::fill_mask::{FillMaskPipelineBuilder, ModernBertSize};
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! # let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
-//! let texts = &["The [MASK] is shining.", "She plays the [MASK] beautifully."];
+//! let output = pipeline.run(&["The [MASK] is shining.", "She plays the [MASK] beautifully."])?;
 //!
-//! let results = pipeline.predict_batch(texts)?;
+//! for pred in output.predictions {
+//!     println!("{}", pred?.token);
+//! }
 //! # Ok(())
 //! # }
 //! ```
@@ -67,8 +69,11 @@ pub(crate) mod pipeline;
 // ============ Public API ============
 
 pub use crate::models::ModernBertSize;
+pub use crate::pipelines::stats::PipelineStats;
 pub use builder::FillMaskPipelineBuilder;
-pub use pipeline::{FillMaskPipeline, FillMaskPrediction};
+pub use pipeline::{
+    BatchOutput, BatchTopKOutput, FillMaskInput, FillMaskPipeline, Output, Prediction, TopKOutput,
+};
 
 /// Only for generic annotations. Use [`FillMaskPipelineBuilder::modernbert`].
 pub type FillMaskModernBert = crate::models::modernbert::FillMaskModernBertModel;

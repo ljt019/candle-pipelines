@@ -8,14 +8,13 @@
 //! ```rust,no_run
 //! use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 //!
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
-//! let response = pipeline.completion("Explain quantum computing briefly.").await?;
-//! println!("{}", response);
+//! let output = pipeline.run("Explain quantum computing briefly.")?;
+//! println!("{}", output.text);
+//! println!("Generated {} tokens in {:.2}s", output.stats.tokens_generated, output.stats.total_time.as_secs_f64());
 //! # Ok(())
 //! # }
 //! ```
@@ -26,21 +25,20 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
-//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build().await?;
+//! # fn main() -> candle_pipelines::error::Result<()> {
+//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
 //! let mut messages = vec![
 //!     Message::system("You are a helpful assistant."),
 //!     Message::user("What is Rust?"),
 //! ];
 //!
-//! let response = pipeline.completion(&messages).await?;
+//! let output = pipeline.run(&messages)?;
 //!
 //! // Continue the conversation
-//! messages.push(Message::assistant(&response));
+//! messages.push(Message::assistant(&output.text));
 //! messages.push(Message::user("What makes it memory-safe?"));
 //!
-//! let followup_response = pipeline.completion(&messages).await?;
+//! let followup = pipeline.run(&messages)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -51,34 +49,32 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 //!     .temperature(0.8)    // randomness (0.0 = deterministic)
 //!     .top_k(50)           // sample from top 50 tokens
 //!     .top_p(0.9)          // nucleus sampling
 //!     .max_len(1024)       // max tokens to generate
 //!     .repeat_penalty(1.1) // discourage repetition
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! # Streaming
 //!
-//! Get tokens as they're generated:
+//! Streaming is fully sync - no async runtime needed:
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
-//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build().await?;
-//! let mut stream = pipeline.completion_stream("Write a poem about Rust.").await?;
+//! # fn main() -> candle_pipelines::error::Result<()> {
+//! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
+//! let mut stream = pipeline.run_iter("Write a poem about Rust.")?;
 //!
-//! while let Some(token) = stream.next().await {
+//! for token in &mut stream {
 //!     print!("{}", token?);
 //! }
+//! let stats = stream.stats();
 //! # Ok(())
 //! # }
 //! ```
@@ -97,17 +93,14 @@
 //!     Ok(format!("Weather in {}: 72°F, sunny", city))
 //! }
 //!
-//! # #[tokio::main]
-//! # async fn main() -> Result<()> {
+//! # fn main() -> Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
-//! pipeline.register_tools(tools![get_weather]).await;
+//! pipeline.register_tools(tools![get_weather]);
 //!
-//! let response = pipeline
-//!     .completion("What's the weather in Tokyo?")
-//!     .await?;
+//! // Tools are executed automatically when the model calls them
+//! let output = pipeline.run("What's the weather in Tokyo?")?;
 //! # Ok(())
 //! # }
 //! ```
@@ -118,14 +111,9 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, TagParts, XmlParserBuilder};
-//! use futures::StreamExt;
-//! use std::pin::pin;
-//!
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-//!     .build()
-//!     .await?;
+//!     .build()?;
 //!
 //! // Create parser for specific tags
 //! let parser = XmlParserBuilder::new()
@@ -133,11 +121,11 @@
 //!     .register_tag("answer")
 //!     .build();
 //!
-//! // Wrap the token stream with XML parsing (must be pinned)
-//! let stream = pipeline.completion_stream("Solve 2+2. Think step by step.").await?;
-//! let mut event_stream = pin!(parser.wrap_stream(stream));
+//! // Wrap the token iterator with XML parsing
+//! let stream = pipeline.run_iter("Solve 2+2. Think step by step.")?;
+//! let event_iter = parser.wrap_iterator(stream);
 //!
-//! while let Some(event) = event_stream.next().await {
+//! for event in event_iter {
 //!     match (event.tag(), event.part()) {
 //!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
 //!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
@@ -183,9 +171,9 @@ pub use candle_pipelines_macros::{tool, tools};
 pub use message::Message;
 pub use model::{Reasoning, ToggleableReasoning};
 pub use params::GenerationParams;
-pub use parser::{Event, EventStream, TagParts, XmlParser, XmlParserBuilder};
+pub use parser::{Event, EventIterator, EventStream, TagParts, XmlParser, XmlParserBuilder};
 pub use pipeline::{
-    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedFuture, BoxedStream,
+    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, Output,
     TextGeneration, TextGenerationPipeline,
 };
 pub use tools::{ErrorStrategy, Tool, ToolCalling};

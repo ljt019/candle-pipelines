@@ -1,0 +1,19 @@
+[package]
+name = "candle-pipelines-models"
+version = "0.0.1"
+edition = "2021"
+description = "Custom model implementations for candle-pipelines (patches for candle-transformers)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ljt019/candle-pipelines/"
+readme = "README.md"
+
+[dependencies]
+candle-core = "0.9.2-alpha.2"
+candle-nn = "0.9.2-alpha.2"
+candle-transformers = "0.9.2-alpha.2"
+tracing = "0.1"
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]

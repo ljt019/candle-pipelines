@@ -19,43 +19,36 @@ fn get_temperature(city: String) -> Result<String> {
     ))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     println!("Building pipeline...");
 
+    // Fully sync - no async runtime needed for streaming
     let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
         .max_len(8192)
         .cuda(0)
         .tool_error_strategy(ErrorStrategy::ReturnToModel) // let model handle tool errors
-        .build()
-        .await?;
+        .build()?;
 
     println!("Pipeline built successfully.");
 
-    pipeline
-        .register_tools(tools![get_temperature, get_humidity])
-        .await;
+    pipeline.register_tools(tools![get_temperature, get_humidity]);
 
-    let mut stream = pipeline
-        .completion_stream("What's the temp and humidity like in Tokyo?")
-        .await?;
+    let stream = pipeline.run_iter("What's the temp and humidity like in Tokyo?")?;
 
     println!("\n=== Generation with Both Tools ===");
 
-    while let Some(tok) = stream.next().await {
+    for tok in stream {
         print!("{}", tok?);
         std::io::stdout().flush().unwrap();
     }
 
-    pipeline.unregister_tools(tools![get_temperature]).await;
+    pipeline.unregister_tools(tools![get_temperature]);
 
-    let mut stream = pipeline
-        .completion_stream("What's the temp and humidity like in Tokyo?")
-        .await?;
+    let stream = pipeline.run_iter("What's the temp and humidity like in Tokyo?")?;
 
     println!("\n\n=== Generation with Only Humidity Tool ===");
 
-    while let Some(tok) = stream.next().await {
+    for tok in stream {
         print!("{}", tok?);
         std::io::stdout().flush().unwrap();
     }

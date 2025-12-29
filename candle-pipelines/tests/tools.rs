@@ -17,15 +17,13 @@ async fn tool_calling_basic() -> Result<()> {
         .seed(42)
         .max_len(150)
         .tool_error_strategy(ErrorStrategy::ReturnToModel)
-        .build()
+        .build_async()
         .await?;
 
-    pipeline.register_tools(tools![get_weather]).await;
-    let out = pipeline
-        .completion("What's the weather like in Paris today?")
-        .await?;
+    pipeline.register_tools(tools![get_weather]);
+    let out = pipeline.run("What's the weather like in Paris today?")?;
 
-    assert!(out.contains(
+    assert!(out.text.contains(
         "<tool_result name=\"get_weather\">\nThe weather in Paris is sunny.\n</tool_result>"
     ));
     Ok(())
@@ -42,21 +40,21 @@ async fn tool_registration() -> Result<()> {
         .cuda(0)
         .seed(0)
         .max_len(20)
-        .build()
+        .build_async()
         .await?;
 
     // Clear any tools from previous tests (models are cached and shared)
-    pipeline.clear_tools().await;
+    pipeline.clear_tools();
 
-    pipeline.register_tools(tools![echo]).await;
-    assert_eq!(pipeline.registered_tools().await.len(), 1);
+    pipeline.register_tools(tools![echo]);
+    assert_eq!(pipeline.registered_tools().len(), 1);
 
-    pipeline.unregister_tool("echo").await;
-    assert!(pipeline.registered_tools().await.is_empty());
+    pipeline.unregister_tool("echo");
+    assert!(pipeline.registered_tools().is_empty());
 
-    pipeline.register_tools(tools![echo]).await;
-    pipeline.clear_tools().await;
-    assert!(pipeline.registered_tools().await.is_empty());
+    pipeline.register_tools(tools![echo]);
+    pipeline.clear_tools();
+    assert!(pipeline.registered_tools().is_empty());
     Ok(())
 }
 
@@ -72,11 +70,11 @@ async fn tool_error_fail_strategy() -> Result<()> {
         .seed(0)
         .max_len(200)
         .tool_error_strategy(ErrorStrategy::Fail)
-        .build()
+        .build_async()
         .await?;
 
-    pipeline.register_tools(tools![fail_tool]).await;
-    let res = pipeline.completion("call fail_tool").await;
+    pipeline.register_tools(tools![fail_tool]);
+    let res = pipeline.run("call fail_tool");
     assert!(res.is_err());
     Ok(())
 }

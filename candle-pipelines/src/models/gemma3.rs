@@ -1,18 +1,17 @@
 use std::sync::Arc;
 
 use candle_core::quantized::gguf_file;
-use candle_core::{DType, Device, Result as CandleResult, Tensor};
-use candle_transformers::models::quantized_gemma3 as candle_gemma3;
+use candle_core::{DType, Device, Tensor};
+use candle_pipelines_models::quantized_gemma3 as candle_gemma3;
 use minijinja::UndefinedBehavior;
 use minijinja::{context, Environment};
 use minijinja_contrib::{add_to_environment, pycompat};
 use tokenizers::Tokenizer;
-use tokio::fs;
 
 use crate::error::{PipelineError, Result};
 use crate::loaders::GenerationConfig;
 use crate::loaders::{GenerationConfigLoader, GgufModelLoader, HfLoader, TokenizerLoader};
-use crate::pipelines::text_generation::model::{LanguageModelContext, TextGenerationModel};
+use crate::pipelines::text_generation::model::{ModelCache, TextGenerationModel};
 
 /// Available Gemma 3 model sizes.
 #[derive(Debug, Clone, Copy)]
@@ -87,7 +86,7 @@ pub struct ModelInfo {
 /// Only for generic annotations. Use [`TextGenerationPipelineBuilder::gemma3`](crate::text_generation::TextGenerationPipelineBuilder::gemma3).
 #[derive(Clone)]
 pub struct Gemma3 {
-    base_weights: Arc<candle_gemma3::ModelWeights>,
+    weights: Arc<candle_gemma3::ModelWeights>,
     info: ModelInfo,
     tokenizer_repo_id: String,
     generation_config: GenerationConfig,
@@ -138,10 +137,10 @@ impl Gemma3 {
         })
     }
 
-    async fn load_chat_template_env(repo_id: &str) -> Result<Arc<Environment<'static>>> {
-        let tokenizer_config_loader = HfLoader::new(repo_id, "tokenizer_config.json");
-        let tokenizer_config_path = tokenizer_config_loader.load().await?;
-        let tokenizer_config_content = fs::read_to_string(tokenizer_config_path).await?;
+    fn parse_chat_template(
+        tokenizer_config_path: std::path::PathBuf,
+    ) -> Result<Arc<Environment<'static>>> {
+        let tokenizer_config_content = std::fs::read_to_string(tokenizer_config_path)?;
         let config_json: serde_json::Value = serde_json::from_str(&tokenizer_config_content)?;
 
         let chat_template_str = config_json["chat_template"].as_str().ok_or_else(|| {
@@ -164,6 +163,18 @@ impl Gemma3 {
         Ok(Arc::new(env))
     }
 
+    fn load_chat_template_env(repo_id: &str) -> Result<Arc<Environment<'static>>> {
+        let tokenizer_config_loader = HfLoader::new(repo_id, "tokenizer_config.json");
+        let tokenizer_config_path = tokenizer_config_loader.load()?;
+        Self::parse_chat_template(tokenizer_config_path)
+    }
+
+    async fn load_chat_template_env_async(repo_id: &str) -> Result<Arc<Environment<'static>>> {
+        let tokenizer_config_loader = HfLoader::new(repo_id, "tokenizer_config.json");
+        let tokenizer_config_path = tokenizer_config_loader.load_async().await?;
+        Self::parse_chat_template(tokenizer_config_path)
+    }
+
     fn eos_tokens(&self) -> Vec<u32> {
         self.generation_config
             .eos_token_ids
@@ -182,24 +193,21 @@ impl Gemma3 {
         Ok(())
     }
 
-    pub(crate) async fn from_hf(device: &Device, size: Gemma3Size) -> Result<Self> {
-        let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
-        let (mut file, content) = loader.load().await?;
+    fn build_model(
+        device: &Device,
+        mut file: std::fs::File,
+        content: gguf_file::Content,
+        tokenizer_repo_id: String,
+        generation_config: GenerationConfig,
+        chat_template_env: Arc<Environment<'static>>,
+    ) -> Result<Self> {
         let info = Self::parse_metadata(&content, device)?;
         let weights = Arc::new(candle_gemma3::ModelWeights::from_gguf(
             content, &mut file, device,
         )?);
 
-        let tokenizer_repo_id = size.config_repo_id().to_string();
-        let generation_config =
-            GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json")
-                .load()
-                .await?;
-        Self::ensure_eos_tokens(&generation_config)?;
-        let chat_template_env = Self::load_chat_template_env(&tokenizer_repo_id).await?;
-
         Ok(Self {
-            base_weights: weights,
+            weights,
             info,
             tokenizer_repo_id,
             generation_config,
@@ -207,71 +215,79 @@ impl Gemma3 {
         })
     }
 
-    pub(crate) async fn get_tokenizer(&self) -> Result<Tokenizer> {
+    pub(crate) fn from_hf(device: &Device, size: Gemma3Size) -> Result<Self> {
+        let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
+        let (file, content) = loader.load()?;
+
+        let tokenizer_repo_id = size.config_repo_id().to_string();
+        let generation_config =
+            GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json").load()?;
+        Self::ensure_eos_tokens(&generation_config)?;
+        let chat_template_env = Self::load_chat_template_env(&tokenizer_repo_id)?;
+
+        Self::build_model(
+            device,
+            file,
+            content,
+            tokenizer_repo_id,
+            generation_config,
+            chat_template_env,
+        )
+    }
+
+    pub(crate) async fn from_hf_async(device: &Device, size: Gemma3Size) -> Result<Self> {
+        let loader = GgufModelLoader::new(size.weight_repo_id(), size.weight_filename());
+        let (file, content) = loader.load_async().await?;
+
+        let tokenizer_repo_id = size.config_repo_id().to_string();
+        let generation_config =
+            GenerationConfigLoader::new(&tokenizer_repo_id, "generation_config.json")
+                .load_async()
+                .await?;
+        Self::ensure_eos_tokens(&generation_config)?;
+        let chat_template_env = Self::load_chat_template_env_async(&tokenizer_repo_id).await?;
+
+        Self::build_model(
+            device,
+            file,
+            content,
+            tokenizer_repo_id,
+            generation_config,
+            chat_template_env,
+        )
+    }
+
+    pub(crate) fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new(&self.tokenizer_repo_id, "tokenizer.json");
-        tokenizer_loader.load().await
+        tokenizer_loader.load()
     }
 }
 
-pub struct Context {
-    base_weights: candle_gemma3::ModelWeights,
-    weights: candle_gemma3::ModelWeights,
-    position: usize,
-}
-
-impl Context {
-    pub fn new(weights: candle_gemma3::ModelWeights) -> Self {
-        Self {
-            base_weights: weights.clone(),
-            weights,
-            position: 0,
-        }
-    }
-
-    pub fn reset_with(&mut self, weights: &candle_gemma3::ModelWeights) {
-        self.base_weights = weights.clone();
-        self.weights = weights.clone();
-        self.position = 0;
-    }
-
-    pub fn generate(&mut self, input: &Tensor) -> CandleResult<Tensor> {
-        let input = if input.dtype() != DType::I64 {
-            input.to_dtype(DType::I64)?
-        } else {
-            input.clone()
-        };
-        let seq_len = input.dim(1)?;
-        let logits = self.weights.forward(&input, self.position)?;
-        self.position += seq_len;
-        Ok(logits)
-    }
-}
-
-impl LanguageModelContext for Context {
-    fn generate(&mut self, input: &Tensor) -> candle_core::Result<Tensor> {
-        Context::generate(self, input)
-    }
-
+// Implement ModelCache for the external cache type
+impl ModelCache for candle_gemma3::Cache {
     fn reset(&mut self) {
-        self.weights = self.base_weights.clone();
-        self.position = 0;
+        candle_gemma3::Cache::reset(self);
     }
 
-    fn position(&self) -> usize {
-        self.position
+    fn current_seq_len(&self) -> usize {
+        candle_gemma3::Cache::current_seq_len(self)
     }
 }
 
 impl TextGenerationModel for Gemma3 {
     type Options = Gemma3Size;
-    type Context = Context;
+    type Cache = candle_gemma3::Cache;
 
-    async fn new(options: Self::Options, device: Device) -> Result<Self> {
-        Gemma3::from_hf(&device, options).await
+    fn new(options: Self::Options, device: Device) -> Result<Self> {
+        Gemma3::from_hf(&device, options)
     }
 
-    async fn get_tokenizer(&self) -> Result<Tokenizer> {
-        Gemma3::get_tokenizer(self).await
+    async fn new_async(options: Self::Options, device: Device) -> Result<Self> {
+        Gemma3::from_hf_async(&device, options).await
+    }
+
+    fn get_tokenizer(&self) -> Result<Tokenizer> {
+        Gemma3::get_tokenizer(self)
     }
 
     fn apply_chat_template(
@@ -312,12 +328,17 @@ impl TextGenerationModel for Gemma3 {
         self.info.max_seq_len
     }
 
-    fn new_context(&self) -> Context {
-        Context::new((*self.base_weights).clone())
+    fn new_cache(&self) -> Self::Cache {
+        self.weights.new_cache()
     }
 
-    fn clear_context(&self, context: &mut Context) {
-        context.reset_with(&self.base_weights);
+    fn forward(&self, input: &Tensor, cache: &mut Self::Cache) -> candle_core::Result<Tensor> {
+        let input = if input.dtype() != DType::I64 {
+            input.to_dtype(DType::I64)?
+        } else {
+            input.clone()
+        };
+        self.weights.forward(&input, cache)
     }
 
     fn default_generation_params(

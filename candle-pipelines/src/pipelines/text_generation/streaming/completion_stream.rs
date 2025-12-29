@@ -1,118 +1,72 @@
 use crate::error::Result;
-use futures::Stream;
-use futures::StreamExt;
-use pin_project_lite::pin_project;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::sync::{Arc, Mutex};
 
-pin_project! {
-    pub struct CompletionStream<S> {
-        #[pin]
-        inner: Pin<Box<S>>,
-        stats: std::sync::Arc<std::sync::Mutex<crate::pipelines::text_generation::stats::GenerationStats>>,
+/// A streaming iterator over generated tokens.
+///
+/// This is a sync iterator - each call to `next()` blocks while generating the next token.
+/// For web server integration, wrap with `tokio::task::spawn_blocking` or use
+/// `tokio_stream::iter()`.
+pub struct CompletionStream<I> {
+    inner: I,
+    stats: Arc<Mutex<crate::pipelines::text_generation::stats::GenerationStats>>,
+}
+
+impl<I> CompletionStream<I> {
+    pub(crate) fn new(
+        inner: I,
+        stats: Arc<Mutex<crate::pipelines::text_generation::stats::GenerationStats>>,
+    ) -> Self {
+        Self { inner, stats }
+    }
+
+    /// Get current generation statistics.
+    pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
+        self.stats.lock().unwrap().clone()
     }
 }
 
-impl<S> CompletionStream<S> {
-    pub(crate) fn new(
-        inner: S,
-        stats: std::sync::Arc<
-            std::sync::Mutex<crate::pipelines::text_generation::stats::GenerationStats>,
-        >,
-    ) -> Self {
-        Self {
-            inner: Box::pin(inner),
-            stats,
-        }
-    }
+impl<I> Iterator for CompletionStream<I>
+where
+    I: Iterator<Item = Result<String>>,
+{
+    type Item = Result<String>;
 
-    pub async fn next(&mut self) -> Option<Result<String>>
-    where
-        S: Stream<Item = Result<String>>,
-    {
-        self.inner.as_mut().next().await
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
     }
+}
 
-    pub async fn collect(mut self) -> Result<String>
-    where
-        S: Stream<Item = Result<String>>,
-    {
+impl<I> CompletionStream<I>
+where
+    I: Iterator<Item = Result<String>>,
+{
+    /// Collect all tokens into a single string.
+    pub fn collect_string(self) -> Result<String> {
         let mut out = String::new();
-        while let Some(chunk) = self.inner.as_mut().next().await {
+        for chunk in self {
             out.push_str(&chunk?);
         }
         Ok(out)
     }
 
-    pub async fn take(mut self, n: usize) -> Result<Vec<String>>
-    where
-        S: Stream<Item = Result<String>>,
-    {
-        let mut out = Vec::new();
-        for _ in 0..n {
-            match self.inner.as_mut().next().await {
-                Some(chunk) => out.push(chunk?),
-                None => break,
-            }
-        }
-        Ok(out)
+    /// Take up to n tokens.
+    pub fn take_tokens(self, n: usize) -> impl Iterator<Item = Result<String>> {
+        self.take(n)
     }
 
-    pub fn map<F, T>(self, f: F) -> CompletionStream<impl Stream<Item = T>>
+    /// Map over the token results.
+    pub fn map_tokens<F, T>(self, f: F) -> impl Iterator<Item = T>
     where
-        S: Stream<Item = Result<String>>,
         F: FnMut(Result<String>) -> T,
     {
-        CompletionStream::new(self.inner.map(f), self.stats)
+        self.map(f)
     }
 
-    pub fn filter<F>(self, mut f: F) -> CompletionStream<impl Stream<Item = Result<String>>>
+    /// Filter tokens based on a predicate.
+    pub fn filter_tokens<F>(self, f: F) -> impl Iterator<Item = Result<String>>
     where
-        S: Stream<Item = Result<String>>,
         F: FnMut(&Result<String>) -> bool,
     {
-        CompletionStream::new(
-            self.inner.filter(move |item| std::future::ready(f(item))),
-            self.stats,
-        )
-    }
-
-    pub async fn fold<T, F>(self, init: T, mut f: F) -> T
-    where
-        S: Stream<Item = Result<String>>,
-        F: FnMut(T, Result<String>) -> T,
-    {
-        self.inner
-            .fold(init, |acc, item| std::future::ready(f(acc, item)))
-            .await
-    }
-
-    pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
-        self.stats.lock().unwrap().clone()
-    }
-
-    /// Convert to a boxed stream for type unification.
-    pub fn boxed<'a>(
-        self,
-    ) -> CompletionStream<Pin<Box<dyn Stream<Item = Result<String>> + Send + 'a>>>
-    where
-        S: Stream<Item = Result<String>> + Send + 'a,
-    {
-        CompletionStream {
-            inner: Box::pin(self.inner),
-            stats: self.stats,
-        }
-    }
-}
-
-impl<S> Stream for CompletionStream<S>
-where
-    S: Stream<Item = Result<String>>,
-{
-    type Item = Result<String>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        this.inner.as_mut().as_mut().poll_next(cx)
+        self.filter(f)
     }
 }

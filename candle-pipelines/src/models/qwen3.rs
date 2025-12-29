@@ -1,5 +1,5 @@
-use candle_core::{DType, Device, Result as CandleResult, Tensor};
-use candle_transformers::models::quantized_qwen3 as candle_qwen3;
+use candle_core::{Device, Tensor};
+use candle_pipelines_models::quantized_qwen3 as candle_qwen3;
 use minijinja::UndefinedBehavior;
 use minijinja::{context, Environment};
 use minijinja_contrib::{add_to_environment, pycompat};
@@ -102,11 +102,9 @@ impl Clone for Qwen3 {
 }
 
 impl Qwen3 {
-    async fn load_chat_template_env() -> Result<Arc<Environment<'static>>> {
-        let tokenizer_config_loader =
-            crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
-
-        let tokenizer_config_path = tokenizer_config_loader.load().await?;
+    fn parse_chat_template(
+        tokenizer_config_path: std::path::PathBuf,
+    ) -> Result<Arc<Environment<'static>>> {
         let tokenizer_config_content = std::fs::read_to_string(tokenizer_config_path)?;
         let config_json: serde_json::Value = serde_json::from_str(&tokenizer_config_content)?;
 
@@ -145,28 +143,27 @@ impl Qwen3 {
         Ok(Arc::new(env))
     }
 
-    pub(crate) async fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
-        let (repo_id, file_name) = size.to_id();
+    fn load_chat_template_env() -> Result<Arc<Environment<'static>>> {
+        let tokenizer_config_loader =
+            crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
+        let tokenizer_config_path = tokenizer_config_loader.load()?;
+        Self::parse_chat_template(tokenizer_config_path)
+    }
 
-        let model_loader = GgufModelLoader::new(&repo_id, &file_name);
-        let (mut file, content) = model_loader.load().await?;
+    async fn load_chat_template_env_async() -> Result<Arc<Environment<'static>>> {
+        let tokenizer_config_loader =
+            crate::loaders::HfLoader::new("Qwen/Qwen3-0.6B", "tokenizer_config.json");
+        let tokenizer_config_path = tokenizer_config_loader.load_async().await?;
+        Self::parse_chat_template(tokenizer_config_path)
+    }
 
-        let generation_config = crate::loaders::GenerationConfigLoader::new(
-            "Qwen/Qwen3-0.6B",
-            "generation_config.json",
-        )
-        .load()
-        .await?;
-
-        let num_layers = content
-            .metadata
-            .get("qwen3.block_count")
-            .ok_or_else(|| {
-                PipelineError::Unexpected(
-                    "Missing 'qwen3.block_count' in Qwen3 model metadata".to_string(),
-                )
-            })?
-            .to_u32()? as usize;
+    fn build_model(
+        device: &Device,
+        mut file: std::fs::File,
+        content: candle_core::quantized::gguf_file::Content,
+        generation_config: crate::loaders::GenerationConfig,
+        chat_template_env: Arc<Environment<'static>>,
+    ) -> Result<Self> {
         let max_seq_len = content
             .metadata
             .get("qwen3.context_length")
@@ -176,25 +173,14 @@ impl Qwen3 {
                 )
             })?
             .to_u32()? as usize;
-        let dtype = match content.metadata.get("general.dtype") {
-            Some(v) => match v.to_u32().unwrap_or(1) {
-                0 => DType::F32,
-                1 => DType::F16,
-                _ => DType::F16,
-            },
-            None => DType::F16,
-        };
         let info = ModelInfo {
-            num_layers,
             max_seq_len,
-            dtype,
-            device: device.clone(),
+            _device: device.clone(),
         };
 
         let weights = Arc::new(candle_qwen3::ModelWeights::from_gguf(
             content, &mut file, device,
         )?);
-        let chat_template_env = Self::load_chat_template_env().await?;
         Ok(Self {
             weights,
             info,
@@ -204,97 +190,69 @@ impl Qwen3 {
         })
     }
 
-    pub(crate) async fn get_tokenizer(&self) -> Result<Tokenizer> {
+    pub(crate) fn from_hf(device: &Device, size: Qwen3Size) -> Result<Self> {
+        let (repo_id, file_name) = size.to_id();
+
+        let model_loader = GgufModelLoader::new(&repo_id, &file_name);
+        let (file, content) = model_loader.load()?;
+
+        let generation_config = crate::loaders::GenerationConfigLoader::new(
+            "Qwen/Qwen3-0.6B",
+            "generation_config.json",
+        )
+        .load()?;
+
+        let chat_template_env = Self::load_chat_template_env()?;
+        Self::build_model(device, file, content, generation_config, chat_template_env)
+    }
+
+    pub(crate) async fn from_hf_async(device: &Device, size: Qwen3Size) -> Result<Self> {
+        let (repo_id, file_name) = size.to_id();
+
+        let model_loader = GgufModelLoader::new(&repo_id, &file_name);
+        let (file, content) = model_loader.load_async().await?;
+
+        let generation_config = crate::loaders::GenerationConfigLoader::new(
+            "Qwen/Qwen3-0.6B",
+            "generation_config.json",
+        )
+        .load_async()
+        .await?;
+
+        let chat_template_env = Self::load_chat_template_env_async().await?;
+        Self::build_model(device, file, content, generation_config, chat_template_env)
+    }
+
+    pub(crate) fn get_tokenizer(&self) -> Result<Tokenizer> {
         let tokenizer_loader = TokenizerLoader::new("Qwen/Qwen3-0.6B", "tokenizer.json");
-        let tokenizer = tokenizer_loader.load().await?;
-        Ok(tokenizer)
-    }
-}
-
-pub struct Context {
-    weights: candle_qwen3::ModelWeights,
-    info: ModelInfo,
-    position: usize,
-}
-
-impl Context {
-    pub fn new(weights: Arc<candle_qwen3::ModelWeights>, info: ModelInfo) -> Self {
-        let mut weights = (*weights).clone();
-        weights.clear_kv_cache();
-        Self {
-            weights,
-            info,
-            position: 0,
-        }
-    }
-
-    pub fn with_cache_size(
-        weights: Arc<candle_qwen3::ModelWeights>,
-        info: ModelInfo,
-        _cache_size: usize,
-    ) -> Self {
-        Self::new(weights, info)
-    }
-
-    pub fn generate(&mut self, input_ids: &Tensor) -> CandleResult<Tensor> {
-        let seq_len = input_ids.dim(1)?;
-
-        if self.position == 0 {
-            self.weights.clear_kv_cache();
-        }
-
-        let logits = self.weights.forward(input_ids, self.position)?;
-        self.position += seq_len;
-        Ok(logits)
-    }
-
-    pub fn reset(&mut self) {
-        self.weights.clear_kv_cache();
-        self.position = 0;
-    }
-
-    pub fn current_position(&self) -> usize {
-        self.position
-    }
-
-    pub fn set_position(&mut self, position: usize) {
-        self.position = position;
-    }
-
-    pub fn info(&self) -> ModelInfo {
-        self.info.clone()
+        tokenizer_loader.load()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
-    pub num_layers: usize,
     pub max_seq_len: usize,
-    pub dtype: DType,
-    pub device: Device,
+    pub _device: Device,
 }
 
 use crate::pipelines::text_generation::model::{
-    LanguageModelContext, Reasoning, TextGenerationModel, ToggleableReasoning,
+    ModelCache, Reasoning, TextGenerationModel, ToggleableReasoning,
 };
 use crate::pipelines::text_generation::tools::ToolCalling;
 
-impl LanguageModelContext for Context {
-    fn generate(&mut self, input: &Tensor) -> candle_core::Result<Tensor> {
-        Context::generate(self, input)
-    }
-
+// Implement ModelCache for the external cache type
+impl ModelCache for candle_qwen3::Cache {
     fn reset(&mut self) {
-        Context::reset(self);
+        candle_qwen3::Cache::reset(self);
     }
 
-    fn position(&self) -> usize {
-        self.position
+    fn current_seq_len(&self) -> usize {
+        candle_qwen3::Cache::current_seq_len(self)
     }
 }
 
 impl TextGenerationModel for Qwen3 {
-    type Context = Context;
+    type Cache = candle_qwen3::Cache;
     type Options = Qwen3Size;
 
     fn get_eos_token(&self) -> Option<u32> {
@@ -317,12 +275,16 @@ impl TextGenerationModel for Qwen3 {
         self.info.max_seq_len
     }
 
-    async fn new(options: Self::Options, device: candle_core::Device) -> Result<Self> {
-        Qwen3::from_hf(&device, options).await
+    fn new(options: Self::Options, device: candle_core::Device) -> Result<Self> {
+        Qwen3::from_hf(&device, options)
     }
 
-    async fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer> {
-        Qwen3::get_tokenizer(self).await
+    async fn new_async(options: Self::Options, device: candle_core::Device) -> Result<Self> {
+        Qwen3::from_hf_async(&device, options).await
+    }
+
+    fn get_tokenizer(&self) -> Result<tokenizers::Tokenizer> {
+        Qwen3::get_tokenizer(self)
     }
 
     fn apply_chat_template(
@@ -385,12 +347,12 @@ impl TextGenerationModel for Qwen3 {
         Ok(rendered)
     }
 
-    fn new_context(&self) -> Context {
-        Context::new(self.weights.clone(), self.info.clone())
+    fn new_cache(&self) -> Self::Cache {
+        self.weights.new_cache()
     }
 
-    fn clear_context(&self, context: &mut Context) {
-        context.reset();
+    fn forward(&self, input: &Tensor, cache: &mut Self::Cache) -> candle_core::Result<Tensor> {
+        self.weights.forward(input, cache)
     }
 
     fn default_generation_params(
