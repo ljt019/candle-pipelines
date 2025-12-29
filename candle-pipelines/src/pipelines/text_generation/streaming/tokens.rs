@@ -21,6 +21,7 @@ impl<I> Tokens<I> {
     }
 
     /// Get generation statistics.
+    #[allow(dead_code)]
     pub fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
         self.stats.lock().unwrap().clone()
     }
@@ -37,6 +38,16 @@ where
     }
 }
 
+impl<I> crate::pipelines::text_generation::pipeline::TokenIterator for Tokens<I>
+where
+    I: Iterator<Item = Result<String>> + Send,
+{
+    fn stats(&self) -> crate::pipelines::text_generation::stats::GenerationStats {
+        self.stats.lock().unwrap().clone()
+    }
+}
+
+#[allow(dead_code)]
 impl<I> Tokens<I>
 where
     I: Iterator<Item = Result<String>>,

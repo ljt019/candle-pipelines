@@ -28,10 +28,10 @@ fn main() -> Result<()> {
     let stream = pipeline.run_iter("What's the weather like in Tokyo?")?;
 
     // Wrap iterator with XML parser
-    let event_iter = parser.wrap_iterator(stream);
+    let events = parser.parse(stream);
 
     println!("\n--- Generated Events ---");
-    for event in event_iter {
+    for event in events {
         match event.tag() {
             Some("think") => match event.part() {
                 TagParts::Start => println!("[THINKING]"),

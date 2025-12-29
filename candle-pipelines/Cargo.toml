@@ -1,7 +1,7 @@
 [package]
 name = "candle-pipelines"
 description = "Simple, intuitive pipelines for local LLM inference in Rust, powered by Candle. Inspired by Python's Transformers library."
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ljt019/candle-pipelines/"

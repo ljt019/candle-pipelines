@@ -564,10 +564,10 @@ impl XmlParser {
     ///
     /// ```rust,ignore
     /// let parser = XmlParserBuilder::new().register_tag("think").build();
-    /// let token_iter = pipeline.run_iter("...")?;
-    /// let mut event_iter = parser.wrap_iterator(token_iter);
+    /// let tokens = pipeline.run_iter("...")?;
+    /// let events = parser.parse(tokens);
     ///
-    /// for event in event_iter {
+    /// for event in events {
     ///     match (event.tag(), event.part()) {
     ///         (Some("think"), TagParts::Content) => println!("[thinking] {}", event.get_content()),
     ///         (None, TagParts::Content) => print!("{}", event.get_content()),
@@ -575,17 +575,17 @@ impl XmlParser {
     ///     }
     /// }
     /// ```
-    pub fn wrap_iterator<I>(&self, iter: I) -> EventIterator<I>
+    pub fn parse<I>(&self, iter: I) -> EventIterator<I>
     where
         I: Iterator<Item = crate::error::Result<String>>,
     {
         EventIterator::new(self.clone(), iter)
     }
 
-    /// Wrap a token stream to produce XML parsing events (async version).
+    /// Parse an async token stream to produce XML events.
     ///
-    /// Use this for async streams like those from the reader pipeline.
-    pub fn wrap_stream<S>(&self, stream: S) -> EventStream<S>
+    /// Use this for async streams.
+    pub fn parse_stream<S>(&self, stream: S) -> EventStream<S>
     where
         S: futures::Stream<Item = crate::error::Result<String>> + Send,
     {

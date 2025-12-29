@@ -123,7 +123,7 @@
 //!
 //! // Wrap the token iterator with XML parsing
 //! let tokens = pipeline.run_iter("Solve 2+2. Think step by step.")?;
-//! let events = parser.wrap_iterator(tokens);
+//! let events = parser.parse(tokens);
 //!
 //! for event in events {
 //!     match (event.tag(), event.part()) {
@@ -173,7 +173,7 @@ pub use model::{Reasoning, ToggleableReasoning};
 pub use params::GenerationParams;
 pub use parser::{Event, EventIterator, EventStream, TagParts, XmlParser, XmlParserBuilder};
 pub use pipeline::{
-    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, Output, TextGeneration,
-    TextGenerationPipeline,
+    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, BoxedTokenIterator,
+    Output, TextGeneration, TextGenerationPipeline, TokenIterator,
 };
 pub use tools::{ErrorStrategy, Tool, ToolCalling};

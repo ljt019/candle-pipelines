@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "candle-pipelines"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "aho-corasick",
  "async-stream",

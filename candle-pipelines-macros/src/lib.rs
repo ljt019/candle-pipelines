@@ -269,8 +269,8 @@ impl Parse for ToolsList {
 /// /// Get weather.
 /// fn get_weather(city: String) -> Result<String> { Ok(city) }
 ///
-/// async fn example(pipeline: TextGenerationPipeline<Qwen3>) {
-///     pipeline.register_tools(tools![get_weather]).await;
+/// fn example(pipeline: TextGenerationPipeline<Qwen3>) {
+///     pipeline.register_tools(tools![get_weather]);
 /// }
 /// ```
 #[proc_macro]

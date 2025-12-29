@@ -112,7 +112,7 @@ There are two basic ways to generate text:
 
 #### Providing a single prompt
 
-Use the `completion` method for straightforward text generation from a single prompt string.
+Use the `run` method for straightforward text generation from a single prompt string.
 
 ```rust
 use candle_pipelines::error::Result;
@@ -285,7 +285,7 @@ fn main() -> Result<()> {
     let tokens = pipeline.run_iter("Explain your reasoning step by step.")?;
 
     // 4. Wrap with XML parser
-    let events = parser.wrap_iterator(tokens);
+    let events = parser.parse(tokens);
 
     // 5. Process events
     for event in events {
@@ -320,9 +320,9 @@ fn main() -> Result<()> {
     let pipeline = FillMaskPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Fill the mask
-    let prediction = pipeline.predict("The capital of France is [MASK].")?;
+    let output = pipeline.run("The capital of France is [MASK].")?;
 
-    println!("{}: {:.2}", prediction.word, prediction.score);
+    println!("{}: {:.2}", output.prediction.token, output.prediction.score);
     // Output: Paris: 0.98
     Ok(())
 }
@@ -339,9 +339,9 @@ fn main() -> Result<()> {
     let pipeline = SentimentAnalysisPipelineBuilder::modernbert(ModernBertSize::Base).build()?;
 
     // 2. Analyze sentiment
-    let result = pipeline.predict("I love using Rust for my projects!")?;
+    let output = pipeline.run("I love using Rust for my projects!")?;
 
-    println!("Sentiment: {} (confidence: {:.2})", result.label, result.score);
+    println!("Sentiment: {} (confidence: {:.2})", output.prediction.label, output.prediction.score);
     // Output: Sentiment: positive (confidence: 0.98)
     Ok(())
 }
@@ -351,7 +351,7 @@ fn main() -> Result<()> {
 
 Zero-shot classification offers two methods for different use cases:
 
-#### Single-Label Classification (`classify`)
+#### Single-Label Classification (`run`)
 
 Use when you want to classify text into one of several **mutually exclusive** categories. Probabilities sum to 1.0.
 
@@ -365,12 +365,12 @@ fn main() -> Result<()> {
 
     // 2. Single-label classification
     let text = "The Federal Reserve raised interest rates.";
-    let candidate_labels = &["economics", "politics", "technology", "sports"];
-    let results = pipeline.classify(text, candidate_labels)?;
+    let labels = &["economics", "politics", "technology", "sports"];
+    let output = pipeline.run(text, labels)?;
 
     println!("Text: {}", text);
-    for result in results {
-        println!("- {}: {:.4}", result.label, result.score);
+    for p in &output.predictions {
+        println!("- {}: {:.4}", p.label, p.score);
     }
     // Example output (probabilities sum to 1.0):
     // - economics: 0.8721
@@ -382,7 +382,7 @@ fn main() -> Result<()> {
 }
 ```
 
-#### Multi-Label Classification (`classify_multi_label`)
+#### Multi-Label Classification (`run_multi_label`)
 
 Use when labels can be **independent** and multiple labels could apply to the same text. Returns raw entailment probabilities.
 
@@ -396,12 +396,12 @@ fn main() -> Result<()> {
 
     // 2. Multi-label classification
     let text = "I love reading books about machine learning and artificial intelligence.";
-    let candidate_labels = &["technology", "education", "reading", "science"];
-    let results = pipeline.classify_multi_label(text, candidate_labels)?;
+    let labels = &["technology", "education", "reading", "science"];
+    let output = pipeline.run_multi_label(text, labels)?;
 
     println!("Text: {}", text);
-    for result in results {
-        println!("- {}: {:.4}", result.label, result.score);
+    for p in &output.predictions {
+        println!("- {}: {:.4}", p.label, p.score);
     }
     // Example output (independent probabilities):
     // - technology: 0.9234

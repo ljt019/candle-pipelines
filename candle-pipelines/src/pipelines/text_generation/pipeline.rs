@@ -24,6 +24,15 @@ pub struct Output {
     pub stats: GenerationStats,
 }
 
+/// Token iterator trait with statistics access.
+pub trait TokenIterator: Iterator<Item = Result<String>> + Send {
+    /// Get generation statistics.
+    fn stats(&self) -> GenerationStats;
+}
+
+/// Boxed token iterator type for trait object compatibility.
+pub type BoxedTokenIterator<'a> = Box<dyn TokenIterator + 'a>;
+
 // ============ Object-safe trait for runtime model switching ============
 
 /// Boxed iterator type for trait object compatibility.
@@ -43,8 +52,7 @@ pub trait TextGeneration: Send + Sync {
     fn run(&self, messages: &[Message]) -> Result<Output>;
 
     /// Iterate over tokens as they're generated.
-    fn run_iter<'a>(&'a self, messages: &'a [Message])
-        -> Result<BoxedIterator<'a, Result<String>>>;
+    fn run_iter<'a>(&'a self, messages: &'a [Message]) -> Result<BoxedTokenIterator<'a>>;
 
     /// Whether this model supports tool calling.
     fn supports_tools(&self) -> bool {
@@ -409,9 +417,8 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
         M: 'a,
     {
         let tools = self.active_tools();
-        match input.into() {
+        let (tokens, reset_cache) = match input.into() {
             Input::Prompt(p) => {
-                self.base.cache.lock().unwrap().reset();
                 let templated = self
                     .base
                     .model
@@ -429,12 +436,11 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                     })?
                     .get_ids()
                     .to_vec();
-                let prompt_tokens = tokens.len();
-                Ok(self.run_iter_from_tokens(tokens, prompt_tokens))
+                (tokens, true)
             }
             Input::Messages(m) => {
                 let templated = self.base.model.apply_chat_template(m, &tools)?;
-                let new_tokens = self
+                let tokens = self
                     .base
                     .model_tokenizer
                     .encode(templated.as_str(), true)
@@ -447,17 +453,51 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                     })?
                     .get_ids()
                     .to_vec();
-
-                // Always reset context to avoid candle dtype bug in Gemma3's mask
-                // when index_pos > 0 and seq_len > 1 (cache reuse triggers this)
-                self.base.cache.lock().unwrap().reset();
-                self.base.last_processed_tokens.lock().unwrap().clear();
-
-                let prompt_tokens = new_tokens.len();
-                *self.base.last_processed_tokens.lock().unwrap() = new_tokens.clone();
-                Ok(self.run_iter_from_tokens(new_tokens, prompt_tokens))
+                (tokens, true)
             }
+        };
+
+        if reset_cache {
+            self.base.cache.lock().unwrap().reset();
+            self.base.last_processed_tokens.lock().unwrap().clear();
         }
+
+        let prompt_tokens = tokens.len();
+        *self.base.last_processed_tokens.lock().unwrap() = tokens.clone();
+        Ok(self.run_iter_from_tokens(tokens, prompt_tokens))
+    }
+
+    // Streaming from owned messages (for tool-aware iterator)
+    fn run_iter_from_messages_owned(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<
+        crate::pipelines::text_generation::streaming::Tokens<
+            impl Iterator<Item = Result<String>> + Send + '_,
+        >,
+    > {
+        let tools = self.active_tools();
+        let templated = self.base.model.apply_chat_template(&messages, &tools)?;
+        let tokens = self
+            .base
+            .model_tokenizer
+            .encode(templated.as_str(), true)
+            .map_err(|e| {
+                PipelineError::Tokenization(format!(
+                    "Tokenization failed on '{}...': {}",
+                    templated.chars().take(50).collect::<String>(),
+                    e
+                ))
+            })?
+            .get_ids()
+            .to_vec();
+
+        self.base.cache.lock().unwrap().reset();
+        self.base.last_processed_tokens.lock().unwrap().clear();
+
+        let prompt_tokens = tokens.len();
+        *self.base.last_processed_tokens.lock().unwrap() = tokens.clone();
+        Ok(self.run_iter_from_tokens(tokens, prompt_tokens))
     }
 
     fn run_iter_from_tokens<'a>(
@@ -679,6 +719,136 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
 
         Ok(tool_calls)
     }
+
+    /// Create a tool-aware streaming iterator for Qwen3.
+    fn run_iter_with_tools(&self, messages: Vec<Message>) -> Result<ToolAwareIterator<'_, M>> {
+        let tools = self.active_tools();
+
+        // Create initial inner iterator using owned messages helper
+        let inner = self.run_iter_from_messages_owned(messages.clone())?;
+
+        Ok(ToolAwareIterator {
+            pipeline: self,
+            messages,
+            tools,
+            inner: Some(Box::new(inner)),
+            response_buffer: String::new(),
+            pending_output: None,
+            done: false,
+        })
+    }
+}
+
+/// Iterator that handles tool calling during streaming generation.
+///
+/// Streams tokens in real-time while buffering for tool detection.
+struct ToolAwareIterator<'a, M: TextGenerationModel + Send + Sync> {
+    pipeline: &'a TextGenerationPipeline<M>,
+    messages: Vec<Message>,
+    tools: Vec<Tool>,
+    inner: Option<Box<dyn Iterator<Item = Result<String>> + Send + 'a>>,
+    response_buffer: String,
+    pending_output: Option<std::vec::IntoIter<String>>,
+    done: bool,
+}
+
+impl<M: TextGenerationModel + Send + Sync> Iterator for ToolAwareIterator<'_, M> {
+    type Item = Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.done {
+                return None;
+            }
+
+            // Yield any pending tool output first
+            if let Some(ref mut pending) = self.pending_output {
+                if let Some(chunk) = pending.next() {
+                    return Some(Ok(chunk));
+                }
+                self.pending_output = None;
+            }
+
+            // Try to get next token from inner iterator
+            if let Some(ref mut inner) = self.inner {
+                if let Some(result) = inner.next() {
+                    // Buffer for tool detection, but yield immediately
+                    if let Ok(ref token) = result {
+                        self.response_buffer.push_str(token);
+                    }
+                    return Some(result);
+                }
+                // Inner iterator exhausted - drop inner to release borrow
+                self.inner = None;
+            }
+
+            // Inner exhausted - check for tool calls in buffered response
+            let tool_calls =
+                match TextGenerationPipeline::<M>::extract_tool_calls(&self.response_buffer) {
+                    Ok(calls) => calls,
+                    Err(e) => {
+                        self.done = true;
+                        return Some(Err(e));
+                    }
+                };
+
+            if tool_calls.is_empty() {
+                // No tool calls - we're done
+                self.done = true;
+                return None;
+            }
+
+            // Execute tool calls
+            self.messages
+                .push(Message::assistant(&self.response_buffer));
+            self.response_buffer.clear();
+
+            let tool_results = match futures::executor::block_on(
+                self.pipeline.execute_tool_calls(tool_calls, &self.tools),
+            ) {
+                Ok(results) => results,
+                Err(e) => {
+                    self.done = true;
+                    return Some(Err(e));
+                }
+            };
+
+            // Format tool results for output and model
+            let user_output: Vec<String> = tool_results.iter().map(|r| r.for_user()).collect();
+            let tool_output = format!("\n\n{}\n\n", user_output.join("\n"));
+
+            // Add raw results as tool messages for model
+            for result in tool_results {
+                self.messages.push(result.for_model());
+            }
+
+            // Queue tool output to yield
+            self.pending_output = Some(vec![tool_output].into_iter());
+
+            // Create new inner iterator for continued generation
+            match self
+                .pipeline
+                .run_iter_from_messages_owned(self.messages.clone())
+            {
+                Ok(new_inner) => {
+                    self.inner = Some(Box::new(new_inner));
+                }
+                Err(e) => {
+                    self.done = true;
+                    return Some(Err(e));
+                }
+            }
+
+            // Continue loop to yield tool output then new tokens
+        }
+    }
+}
+
+impl<'a, M: TextGenerationModel + Send + Sync> TokenIterator for ToolAwareIterator<'a, M> {
+    fn stats(&self) -> GenerationStats {
+        // Stats tracking is limited for tool-aware iteration
+        GenerationStats::new()
+    }
 }
 
 // ============ Per-model inherent methods ============
@@ -704,16 +874,19 @@ impl TextGenerationPipeline<Qwen3> {
 
     /// Iterate over tokens as they're generated.
     ///
+    /// If tools are registered and enabled, they are executed automatically.
     /// Call `.stats()` after iteration to get generation statistics.
-    pub fn run_iter<'a>(
-        &'a self,
-        input: impl Into<Input<'a>>,
-    ) -> Result<
-        crate::pipelines::text_generation::streaming::Tokens<
-            impl Iterator<Item = Result<String>> + Send + 'a,
-        >,
-    > {
-        self.run_iter_basic(input)
+    pub fn run_iter<'a>(&'a self, input: impl Into<Input<'a>>) -> Result<BoxedTokenIterator<'a>> {
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            let messages = match input.into() {
+                Input::Prompt(p) => vec![Message::user(p)],
+                Input::Messages(m) => m.to_vec(),
+            };
+            Ok(Box::new(self.run_iter_with_tools(messages)?))
+        } else {
+            Ok(Box::new(self.run_iter_basic(input)?))
+        }
     }
 }
 
@@ -728,15 +901,8 @@ impl TextGenerationPipeline<Gemma3> {
     /// Iterate over tokens as they're generated.
     ///
     /// Call `.stats()` after iteration to get generation statistics.
-    pub fn run_iter<'a>(
-        &'a self,
-        input: impl Into<Input<'a>>,
-    ) -> Result<
-        crate::pipelines::text_generation::streaming::Tokens<
-            impl Iterator<Item = Result<String>> + Send + 'a,
-        >,
-    > {
-        self.run_iter_basic(input)
+    pub fn run_iter<'a>(&'a self, input: impl Into<Input<'a>>) -> Result<BoxedTokenIterator<'a>> {
+        Ok(Box::new(self.run_iter_basic(input)?))
     }
 }
 
@@ -744,15 +910,23 @@ impl TextGenerationPipeline<Gemma3> {
 
 impl TextGeneration for TextGenerationPipeline<Qwen3> {
     fn run(&self, messages: &[Message]) -> Result<Output> {
-        self.run_basic(messages)
+        // Use Qwen3's inherent run which handles tool execution
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            futures::executor::block_on(self.completion_with_tools_internal(messages))
+        } else {
+            self.run_basic(messages)
+        }
     }
 
-    fn run_iter<'a>(
-        &'a self,
-        messages: &'a [Message],
-    ) -> Result<BoxedIterator<'a, Result<String>>> {
-        let stream = self.run_iter_basic(messages)?;
-        Ok(Box::new(stream))
+    fn run_iter<'a>(&'a self, messages: &'a [Message]) -> Result<BoxedTokenIterator<'a>> {
+        // Use Qwen3's inherent run_iter which handles tool execution
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            Ok(Box::new(self.run_iter_with_tools(messages.to_vec())?))
+        } else {
+            Ok(Box::new(self.run_iter_basic(messages)?))
+        }
     }
 
     fn supports_tools(&self) -> bool {
@@ -805,10 +979,7 @@ impl TextGeneration for TextGenerationPipeline<Gemma3> {
         self.run_basic(messages)
     }
 
-    fn run_iter<'a>(
-        &'a self,
-        messages: &'a [Message],
-    ) -> Result<BoxedIterator<'a, Result<String>>> {
+    fn run_iter<'a>(&'a self, messages: &'a [Message]) -> Result<BoxedTokenIterator<'a>> {
         let stream = self.run_iter_basic(messages)?;
         Ok(Box::new(stream))
     }
