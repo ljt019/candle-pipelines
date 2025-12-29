@@ -10,9 +10,9 @@ fn fill_mask_basic() -> Result<()> {
         .cuda(0)
         .build()?;
 
-    let res = pipeline.predict("The capital of France is [MASK].")?;
-    assert!(!res.word.trim().is_empty());
-    assert!(res.score >= 0.0 && res.score <= 1.0);
+    let output = pipeline.run("The capital of France is [MASK].")?;
+    assert!(!output.prediction.token.trim().is_empty());
+    assert!(output.prediction.score >= 0.0 && output.prediction.score <= 1.0);
     Ok(())
 }
 
@@ -22,7 +22,7 @@ fn fill_mask_empty_input_errors() -> Result<()> {
         .cuda(0)
         .build()?;
 
-    assert!(pipeline.predict("").is_err());
+    assert!(pipeline.run("").is_err());
     Ok(())
 }
 
@@ -32,7 +32,7 @@ fn fill_mask_batch_faster_than_sequential() -> Result<()> {
         .cuda(0)
         .build()?;
 
-    let texts: Vec<&str> = vec![
+    let texts: &[&str] = &[
         "The capital of France is [MASK].",
         "Water boils at 100 degrees [MASK].",
         "The sun rises in the [MASK].",
@@ -43,20 +43,24 @@ fn fill_mask_batch_faster_than_sequential() -> Result<()> {
         "Coffee contains [MASK].",
     ];
 
-    let _ = pipeline.predict(texts[0]);
+    // Warmup
+    let _ = pipeline.run(texts[0]);
 
     let start = Instant::now();
-    let sequential_results: Vec<_> = texts.iter().map(|t| pipeline.predict(t)).collect();
+    let sequential_results: Vec<_> = texts.iter().map(|t| pipeline.run(*t)).collect();
     let sequential_time = start.elapsed();
 
     let start = Instant::now();
-    let batched_results = pipeline.predict_batch(&texts)?;
+    let batched_output = pipeline.run(texts)?;
     let batched_time = start.elapsed();
 
-    for (seq, batch) in sequential_results.iter().zip(batched_results.iter()) {
-        let seq = seq.as_ref().unwrap();
-        let batch = batch.as_ref().unwrap();
-        assert_eq!(seq.word, batch.word, "Predicted words should match");
+    for (seq, batch) in sequential_results
+        .into_iter()
+        .zip(batched_output.predictions.into_iter())
+    {
+        let seq = seq.unwrap().prediction;
+        let batch = batch.unwrap();
+        assert_eq!(seq.token, batch.token, "Predicted words should match");
     }
 
     assert!(

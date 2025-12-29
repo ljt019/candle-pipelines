@@ -564,7 +564,7 @@ impl XmlParser {
     ///
     /// ```rust,ignore
     /// let parser = XmlParserBuilder::new().register_tag("think").build();
-    /// let token_iter = pipeline.completion_stream("...")?;
+    /// let token_iter = pipeline.run_iter("...")?;
     /// let mut event_iter = parser.wrap_iterator(token_iter);
     ///
     /// for event in event_iter {

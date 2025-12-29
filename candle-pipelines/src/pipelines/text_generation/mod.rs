@@ -8,14 +8,13 @@
 //! ```rust,no_run
 //! use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 //!
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
-//! // Use .build() for sync or .build_async() for async model loading
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 //!     .build()?;
 //!
-//! let response = pipeline.completion("Explain quantum computing briefly.").await?;
-//! println!("{}", response);
+//! let output = pipeline.run("Explain quantum computing briefly.")?;
+//! println!("{}", output.text);
+//! println!("Generated {} tokens in {:.2}s", output.stats.tokens_generated, output.stats.total_time.as_secs_f64());
 //! # Ok(())
 //! # }
 //! ```
@@ -26,21 +25,20 @@
 //!
 //! ```rust,no_run
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
-//! # #[tokio::main]
-//! # async fn main() -> candle_pipelines::error::Result<()> {
+//! # fn main() -> candle_pipelines::error::Result<()> {
 //! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
 //! let mut messages = vec![
 //!     Message::system("You are a helpful assistant."),
 //!     Message::user("What is Rust?"),
 //! ];
 //!
-//! let response = pipeline.completion(&messages).await?;
+//! let output = pipeline.run(&messages)?;
 //!
 //! // Continue the conversation
-//! messages.push(Message::assistant(&response));
+//! messages.push(Message::assistant(&output.text));
 //! messages.push(Message::user("What makes it memory-safe?"));
 //!
-//! let followup_response = pipeline.completion(&messages).await?;
+//! let followup = pipeline.run(&messages)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -71,11 +69,12 @@
 //! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! # let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B).build()?;
-//! let stream = pipeline.completion_stream("Write a poem about Rust.")?;
+//! let mut stream = pipeline.run_iter("Write a poem about Rust.")?;
 //!
-//! for token in stream {
+//! for token in &mut stream {
 //!     print!("{}", token?);
 //! }
+//! let stats = stream.stats();
 //! # Ok(())
 //! # }
 //! ```
@@ -94,16 +93,14 @@
 //!     Ok(format!("Weather in {}: 72°F, sunny", city))
 //! }
 //!
-//! # #[tokio::main]
-//! # async fn main() -> Result<()> {
+//! # fn main() -> Result<()> {
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 //!     .build()?;
 //!
 //! pipeline.register_tools(tools![get_weather]);
 //!
-//! let response = pipeline
-//!     .completion("What's the weather in Tokyo?")
-//!     .await?;
+//! // Tools are executed automatically when the model calls them
+//! let output = pipeline.run("What's the weather in Tokyo?")?;
 //! # Ok(())
 //! # }
 //! ```
@@ -125,7 +122,7 @@
 //!     .build();
 //!
 //! // Wrap the token iterator with XML parsing
-//! let stream = pipeline.completion_stream("Solve 2+2. Think step by step.")?;
+//! let stream = pipeline.run_iter("Solve 2+2. Think step by step.")?;
 //! let event_iter = parser.wrap_iterator(stream);
 //!
 //! for event in event_iter {
@@ -176,7 +173,7 @@ pub use model::{Reasoning, ToggleableReasoning};
 pub use params::GenerationParams;
 pub use parser::{Event, EventIterator, EventStream, TagParts, XmlParser, XmlParserBuilder};
 pub use pipeline::{
-    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedFuture, BoxedIterator,
+    AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, Output,
     TextGeneration, TextGenerationPipeline,
 };
 pub use tools::{ErrorStrategy, Tool, ToolCalling};

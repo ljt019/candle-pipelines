@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod stats;
 pub mod utils;
 
 pub mod fill_mask;

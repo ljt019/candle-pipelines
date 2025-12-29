@@ -21,11 +21,9 @@ async fn tool_calling_basic() -> Result<()> {
         .await?;
 
     pipeline.register_tools(tools![get_weather]);
-    let out = pipeline
-        .completion("What's the weather like in Paris today?")
-        .await?;
+    let out = pipeline.run("What's the weather like in Paris today?")?;
 
-    assert!(out.contains(
+    assert!(out.text.contains(
         "<tool_result name=\"get_weather\">\nThe weather in Paris is sunny.\n</tool_result>"
     ));
     Ok(())
@@ -76,7 +74,7 @@ async fn tool_error_fail_strategy() -> Result<()> {
         .await?;
 
     pipeline.register_tools(tools![fail_tool]);
-    let res = pipeline.completion("call fail_tool").await;
+    let res = pipeline.run("call fail_tool");
     assert!(res.is_err());
     Ok(())
 }

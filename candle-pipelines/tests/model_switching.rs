@@ -15,8 +15,8 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = gemma1.completion("Say hello in one word.").await?;
-    println!("Gemma3 (1st): {}", response);
+    let response = gemma1.run("Say hello in one word.")?;
+    println!("Gemma3 (1st): {}", response.text);
 
     drop(gemma1);
 
@@ -26,8 +26,8 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = qwen.completion("Say hello in one word.").await?;
-    println!("Qwen3: {}", response);
+    let response = qwen.run("Say hello in one word.")?;
+    println!("Qwen3: {}", response.text);
 
     drop(qwen);
 
@@ -37,8 +37,8 @@ async fn gemma_qwen_gemma_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = gemma2.completion("Say hello in one word.").await?;
-    println!("Gemma3 (2nd): {}", response);
+    let response = gemma2.run("Say hello in one word.")?;
+    println!("Gemma3 (2nd): {}", response.text);
 
     Ok(())
 }
@@ -52,8 +52,8 @@ async fn gemma_gemma_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = gemma1.completion("Say hi.").await?;
-    println!("Gemma3 (1st): {}", response);
+    let response = gemma1.run("Say hi.")?;
+    println!("Gemma3 (1st): {}", response.text);
 
     // Drop should now sync the CUDA stream before freeing resources
     drop(gemma1);
@@ -64,8 +64,8 @@ async fn gemma_gemma_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = gemma2.completion("Say hi.").await?;
-    println!("Gemma3 (2nd): {}", response);
+    let response = gemma2.run("Say hi.")?;
+    println!("Gemma3 (2nd): {}", response.text);
 
     Ok(())
 }
@@ -79,8 +79,8 @@ async fn qwen_qwen_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = qwen1.completion("Say hi.").await?;
-    println!("Qwen3 0.6B: {}", response);
+    let response = qwen1.run("Say hi.")?;
+    println!("Qwen3 0.6B: {}", response.text);
 
     drop(qwen1);
 
@@ -90,8 +90,8 @@ async fn qwen_qwen_switch() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = qwen2.completion("Say hi.").await?;
-    println!("Qwen3 4B: {}", response);
+    let response = qwen2.run("Say hi.")?;
+    println!("Qwen3 4B: {}", response.text);
 
     Ok(())
 }
@@ -107,8 +107,8 @@ async fn qwen_same_model_reload() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = qwen1.completion("Say hi.").await?;
-    println!("Qwen3 0.6B (1st): {}", response);
+    let response = qwen1.run("Say hi.")?;
+    println!("Qwen3 0.6B (1st): {}", response.text);
 
     drop(qwen1);
 
@@ -119,8 +119,8 @@ async fn qwen_same_model_reload() -> Result<()> {
         .build_async()
         .await?;
 
-    let response = qwen2.completion("Say hi.").await?;
-    println!("Qwen3 0.6B (2nd): {}", response);
+    let response = qwen2.run("Say hi.")?;
+    println!("Qwen3 0.6B (2nd): {}", response.text);
 
     Ok(())
 }

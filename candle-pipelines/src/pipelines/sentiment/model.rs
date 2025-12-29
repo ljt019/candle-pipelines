@@ -1,6 +1,13 @@
 use crate::error::Result;
 use tokenizers::Tokenizer;
 
+/// Internal sentiment result type used by model trait.
+#[derive(Debug, Clone)]
+pub struct SentimentResult {
+    pub label: String,
+    pub score: f32,
+}
+
 pub trait SentimentAnalysisModel {
     type Options: std::fmt::Debug + Clone;
 
@@ -21,16 +28,16 @@ pub trait SentimentAnalysisModel {
         &self,
         tokenizer: &Tokenizer,
         text: &str,
-    ) -> Result<super::pipeline::SentimentResult> {
+    ) -> Result<SentimentResult> {
         let label = self.predict(tokenizer, text)?;
-        Ok(super::pipeline::SentimentResult { label, score: 1.0 })
+        Ok(SentimentResult { label, score: 1.0 })
     }
 
     fn predict_with_score_batch(
         &self,
         tokenizer: &Tokenizer,
         texts: &[&str],
-    ) -> Result<Vec<Result<super::pipeline::SentimentResult>>> {
+    ) -> Result<Vec<Result<SentimentResult>>> {
         Ok(texts
             .iter()
             .map(|text| self.predict_with_score(tokenizer, text))

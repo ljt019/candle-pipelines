@@ -15,8 +15,8 @@ async fn text_generation_basic() -> Result<()> {
         .build_async()
         .await?;
 
-    let out = pipeline.completion("Rust is a").await?;
-    assert!(!out.trim().is_empty());
+    let out = pipeline.run("Rust is a")?;
+    assert!(!out.text.trim().is_empty());
     Ok(())
 }
 
@@ -29,7 +29,7 @@ async fn text_generation_streaming() -> Result<()> {
         .build_async()
         .await?;
 
-    let stream = pipeline.completion_stream("Hello")?;
+    let stream = pipeline.run_iter("Hello")?;
     let mut acc = String::new();
     for tok in stream {
         acc.push_str(&tok?);
@@ -47,13 +47,13 @@ async fn text_generation_params_update() -> Result<()> {
         .build_async()
         .await?;
 
-    let short = pipeline.completion("Rust is a").await?;
+    let short = pipeline.run("Rust is a")?;
 
     let mut new_params = GenerationParams::default();
     new_params.max_len = 8;
     pipeline.set_generation_params(new_params);
 
-    let longer = pipeline.completion("Rust is a").await?;
-    assert!(longer.len() >= short.len());
+    let longer = pipeline.run("Rust is a")?;
+    assert!(longer.text.len() >= short.text.len());
     Ok(())
 }

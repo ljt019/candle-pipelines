@@ -33,7 +33,7 @@ fn main() -> Result<()> {
 
     pipeline.register_tools(tools![get_temperature, get_humidity]);
 
-    let stream = pipeline.completion_stream("What's the temp and humidity like in Tokyo?")?;
+    let stream = pipeline.run_iter("What's the temp and humidity like in Tokyo?")?;
 
     println!("\n=== Generation with Both Tools ===");
 
@@ -44,7 +44,7 @@ fn main() -> Result<()> {
 
     pipeline.unregister_tools(tools![get_temperature]);
 
-    let stream = pipeline.completion_stream("What's the temp and humidity like in Tokyo?")?;
+    let stream = pipeline.run_iter("What's the temp and humidity like in Tokyo?")?;
 
     println!("\n\n=== Generation with Only Humidity Tool ===");
 

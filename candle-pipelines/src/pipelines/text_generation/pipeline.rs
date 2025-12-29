@@ -1,8 +1,5 @@
 #![allow(unused_assignments)]
 
-use std::future::Future;
-use std::pin::Pin;
-
 use super::base_pipeline::BasePipeline;
 use super::message::Message;
 use super::model::TextGenerationModel;
@@ -16,10 +13,18 @@ use crate::models::{Gemma3, Qwen3};
 use regex::Regex;
 use serde::Deserialize;
 
-// ============ Object-safe trait for runtime model switching ============
+// ============ Output types ============
 
-/// Boxed future type for trait object compatibility.
-pub type BoxedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+/// Output from text generation containing the response and statistics.
+#[derive(Debug, Clone)]
+pub struct Output {
+    /// The generated text response.
+    pub text: String,
+    /// Statistics about the generation (timing, token counts, etc.)
+    pub stats: GenerationStats,
+}
+
+// ============ Object-safe trait for runtime model switching ============
 
 /// Boxed iterator type for trait object compatibility.
 pub type BoxedIterator<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
@@ -30,17 +35,16 @@ pub type BoxedIterator<'a, T> = Box<dyn Iterator<Item = T> + Send + 'a>;
 /// let pipeline: Box<dyn TextGeneration> = Box::new(builder.qwen3(...).build()?);
 ///
 /// pipeline.register_tool(my_tool);
-/// let response = pipeline.completion(&messages).await?;
+/// let output = pipeline.run(&messages)?;
+/// println!("{}", output.text);
 /// ```
 pub trait TextGeneration: Send + Sync {
-    /// Generate a complete response from messages.
-    fn completion<'a>(&'a self, messages: &'a [Message]) -> BoxedFuture<'a, Result<String>>;
+    /// Generate a complete response from messages synchronously.
+    fn run(&self, messages: &[Message]) -> Result<Output>;
 
     /// Stream tokens as they're generated (sync iterator).
-    fn completion_stream<'a>(
-        &'a self,
-        messages: &'a [Message],
-    ) -> Result<BoxedIterator<'a, Result<String>>>;
+    fn run_iter<'a>(&'a self, messages: &'a [Message])
+        -> Result<BoxedIterator<'a, Result<String>>>;
 
     /// Whether this model supports tool calling.
     fn supports_tools(&self) -> bool {
@@ -100,7 +104,7 @@ pub trait TextGeneration: Send + Sync {
 /// );
 ///
 /// pipeline.with_tools(|tc| tc.register_tool(my_tool));
-/// pipeline.completion(&messages).await?;
+/// let output = pipeline.run(&messages)?;
 /// ```
 pub trait AnyTextGenerationPipeline: TextGeneration + Send + Sync {}
 impl<T: TextGeneration + Send + Sync> AnyTextGenerationPipeline for T {}
@@ -172,20 +176,20 @@ impl<'a> From<&'a String> for Input<'a> {
 /// ```rust,no_run
 /// use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size, Message};
 ///
-/// # async fn example() -> candle_pipelines::error::Result<()> {
-/// // Use .build() for sync or .build_async() for async model loading
+/// # fn example() -> candle_pipelines::error::Result<()> {
 /// let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
 ///     .build()?;
 ///
-/// // Simple prompt
-/// let response = pipeline.completion("What is Rust?").await?;
+/// // Simple prompt - returns Output { text, stats }
+/// let output = pipeline.run("What is Rust?")?;
+/// println!("{}", output.text);
 ///
 /// // Multi-turn conversation
 /// let messages = vec![
 ///     Message::system("You are a helpful assistant."),
 ///     Message::user("What is 2+2?"),
 /// ];
-/// let response = pipeline.completion(&messages).await?;
+/// let output = pipeline.run(&messages)?;
 /// # Ok(())
 /// # }
 pub struct TextGenerationPipeline<M: TextGenerationModel> {
@@ -313,33 +317,15 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
         self.base.last_processed_tokens.lock().unwrap().clear();
     }
 
-    // Basic completion - no tool checking. Used by per-model inherent methods.
-    async fn completion_basic<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
+    // Basic run - no tool checking. Used by per-model inherent methods.
+    fn run_basic<'a>(&self, input: impl Into<Input<'a>>) -> Result<Output> {
         match input.into() {
-            Input::Prompt(p) => self.prompt_completion_internal(p),
-            Input::Messages(m) => self.message_completion_internal(m),
+            Input::Prompt(p) => self.prompt_run_internal(p),
+            Input::Messages(m) => self.message_run_internal(m),
         }
     }
 
-    fn completion_basic_with_stats<'a>(
-        &self,
-        input: impl Into<Input<'a>>,
-    ) -> Result<(String, GenerationStats)> {
-        match input.into() {
-            Input::Prompt(p) => self.prompt_completion_internal_with_stats(p),
-            Input::Messages(m) => self.message_completion_internal_with_stats(m),
-        }
-    }
-
-    fn prompt_completion_internal(&self, prompt: &str) -> Result<String> {
-        let (result, _) = self.prompt_completion_internal_with_stats(prompt)?;
-        Ok(result)
-    }
-
-    fn prompt_completion_internal_with_stats(
-        &self,
-        prompt: &str,
-    ) -> Result<(String, GenerationStats)> {
+    fn prompt_run_internal(&self, prompt: &str) -> Result<Output> {
         self.base.cache.lock().unwrap().reset();
 
         let templated_prompt = self.base.model.apply_chat_template(
@@ -361,24 +347,13 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             .get_ids()
             .to_vec();
 
-        self.base
-            .completion_from_tokens_with_stats(&prompt_tokens)
+        let (text, stats) = self
+            .base
+            .completion_from_tokens_with_stats(&prompt_tokens)?;
+        Ok(Output { text, stats })
     }
 
-    fn message_completion_internal(
-        &self,
-        messages: &[super::message::Message],
-    ) -> Result<String> {
-        let (response, _) = self
-            .message_completion_internal_with_stats(messages)?;
-
-        Ok(response)
-    }
-
-    fn message_completion_internal_with_stats(
-        &self,
-        messages: &[super::message::Message],
-    ) -> Result<(String, GenerationStats)> {
+    fn message_run_internal(&self, messages: &[super::message::Message]) -> Result<Output> {
         let templated_prompt = self
             .base
             .model
@@ -407,27 +382,27 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
         } else if self.base.can_reuse_cache(&new_tokens) {
             let prefix_len = self.base.last_processed_tokens.lock().unwrap().len();
             let new_portion = &new_tokens[prefix_len..];
-            let (response, stats) = self
+            let (text, stats) = self
                 .base
                 .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())?;
 
             *self.base.last_processed_tokens.lock().unwrap() = new_tokens.clone();
-            return Ok((response, stats));
+            return Ok(Output { text, stats });
         } else {
             self.base.cache.lock().unwrap().reset();
         }
 
-        let (response, stats) = self
+        let (text, stats) = self
             .base
             .completion_from_tokens_with_prompt_stats(&new_tokens, new_tokens.len())?;
 
         *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
 
-        Ok((response, stats))
+        Ok(Output { text, stats })
     }
 
     // Basic streaming - returns sync iterator
-    fn completion_stream_basic<'a>(
+    fn run_iter_basic<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
     ) -> Result<
@@ -460,7 +435,7 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                     .get_ids()
                     .to_vec();
                 let prompt_tokens = tokens.len();
-                Ok(self.completion_stream_from_tokens(tokens, prompt_tokens))
+                Ok(self.run_iter_from_tokens(tokens, prompt_tokens))
             }
             Input::Messages(m) => {
                 let templated = self.base.model.apply_chat_template(m, &tools)?;
@@ -485,12 +460,12 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
 
                 let prompt_tokens = new_tokens.len();
                 *self.base.last_processed_tokens.lock().unwrap() = new_tokens.clone();
-                Ok(self.completion_stream_from_tokens(new_tokens, prompt_tokens))
+                Ok(self.run_iter_from_tokens(new_tokens, prompt_tokens))
             }
         }
     }
 
-    fn completion_stream_from_tokens<'a>(
+    fn run_iter_from_tokens<'a>(
         &'a self,
         tokens: Vec<u32>,
         prompt_token_count: usize,
@@ -614,8 +589,9 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             let max_seq_len = self.base.model.get_max_seq_len();
             let pending_tokens = new_tokens.len();
 
-            let response =
-                if self.base.cache.lock().unwrap().current_seq_len() + pending_tokens > max_seq_len {
+            let response = if self.base.cache.lock().unwrap().current_seq_len() + pending_tokens
+                > max_seq_len
+            {
                     self.base.cache.lock().unwrap().reset();
                     self.base.last_processed_tokens.lock().unwrap().clear();
                     self.base.completion_from_tokens(&new_tokens)?
@@ -695,31 +671,32 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
 // ============ Per-model inherent methods ============
 
 impl TextGenerationPipeline<Qwen3> {
-    /// Generate a completion. Auto-uses tools if registered and enabled.
-    pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
+    /// Generate a complete response synchronously.
+    ///
+    /// If tools are registered and enabled, they are executed automatically.
+    /// Tool functions (even async ones) are executed blocking since the model
+    /// must wait for tool results before continuing generation.
+    pub fn run<'a>(&self, input: impl Into<Input<'a>>) -> Result<Output> {
         let tools = self.registered_tools();
         if self.tools_enabled() && !tools.is_empty() {
             let messages = match input.into() {
                 Input::Prompt(p) => vec![Message::user(p)],
                 Input::Messages(m) => m.to_vec(),
             };
-            self.completion_with_tools_internal(&messages).await
+            let text = futures::executor::block_on(self.completion_with_tools_internal(&messages))?;
+            // TODO: track stats through tool-calling path
+            let mut stats = GenerationStats::new();
+            stats.finalize();
+            Ok(Output { text, stats })
         } else {
-            self.completion_basic(input).await
+            self.run_basic(input)
         }
     }
 
-    /// Generate with stats. Auto-uses tools if registered and enabled.
-    pub fn completion_with_stats<'a>(
-        &self,
-        input: impl Into<Input<'a>>,
-    ) -> Result<(String, GenerationStats)> {
-        // Note: tool calling doesn't return stats, fallback to basic
-        self.completion_basic_with_stats(input)
-    }
-
     /// Stream tokens as a sync iterator.
-    pub fn completion_stream<'a>(
+    ///
+    /// Call `.stats()` on the returned stream to get generation statistics.
+    pub fn run_iter<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
     ) -> Result<
@@ -727,27 +704,22 @@ impl TextGenerationPipeline<Qwen3> {
             impl Iterator<Item = Result<String>> + Send + 'a,
         >,
     > {
-        // Note: streaming with tools not supported in sync mode, use basic
-        self.completion_stream_basic(input)
+        self.run_iter_basic(input)
     }
 }
 
 impl TextGenerationPipeline<Gemma3> {
-    /// Generate a completion.
-    pub async fn completion<'a>(&self, input: impl Into<Input<'a>>) -> Result<String> {
-        self.completion_basic(input).await
-    }
-
-    /// Generate with stats.
-    pub fn completion_with_stats<'a>(
-        &self,
-        input: impl Into<Input<'a>>,
-    ) -> Result<(String, GenerationStats)> {
-        self.completion_basic_with_stats(input)
+    /// Generate a complete response synchronously.
+    ///
+    /// Returns the generated text and statistics.
+    pub fn run<'a>(&self, input: impl Into<Input<'a>>) -> Result<Output> {
+        self.run_basic(input)
     }
 
     /// Stream tokens as a sync iterator.
-    pub fn completion_stream<'a>(
+    ///
+    /// Call `.stats()` on the returned stream to get generation statistics.
+    pub fn run_iter<'a>(
         &'a self,
         input: impl Into<Input<'a>>,
     ) -> Result<
@@ -755,22 +727,22 @@ impl TextGenerationPipeline<Gemma3> {
             impl Iterator<Item = Result<String>> + Send + 'a,
         >,
     > {
-        self.completion_stream_basic(input)
+        self.run_iter_basic(input)
     }
 }
 
 // ============ TextGeneration trait impls (for dynamic dispatch) ============
 
 impl TextGeneration for TextGenerationPipeline<Qwen3> {
-    fn completion<'a>(&'a self, messages: &'a [Message]) -> BoxedFuture<'a, Result<String>> {
-        Box::pin(async move { self.completion(messages).await })
+    fn run(&self, messages: &[Message]) -> Result<Output> {
+        self.run_basic(messages)
     }
 
-    fn completion_stream<'a>(
+    fn run_iter<'a>(
         &'a self,
         messages: &'a [Message],
     ) -> Result<BoxedIterator<'a, Result<String>>> {
-        let stream = self.completion_stream(messages)?;
+        let stream = self.run_iter_basic(messages)?;
         Ok(Box::new(stream))
     }
 
@@ -820,15 +792,15 @@ impl TextGeneration for TextGenerationPipeline<Qwen3> {
 }
 
 impl TextGeneration for TextGenerationPipeline<Gemma3> {
-    fn completion<'a>(&'a self, messages: &'a [Message]) -> BoxedFuture<'a, Result<String>> {
-        Box::pin(async move { self.completion(messages).await })
+    fn run(&self, messages: &[Message]) -> Result<Output> {
+        self.run_basic(messages)
     }
 
-    fn completion_stream<'a>(
+    fn run_iter<'a>(
         &'a self,
         messages: &'a [Message],
     ) -> Result<BoxedIterator<'a, Result<String>>> {
-        let stream = self.completion_stream(messages)?;
+        let stream = self.run_iter_basic(messages)?;
         Ok(Box::new(stream))
     }
 
@@ -894,7 +866,7 @@ mod cache_tests {
             pipelines.push(pipeline);
         }
 
-        let _ = pipelines[0].completion("Hello").await?;
+        let _ = pipelines[0].run("Hello")?;
         assert!(pipelines[0].base.cache.lock().unwrap().current_seq_len() > 0);
 
         for p in pipelines.iter().skip(1) {

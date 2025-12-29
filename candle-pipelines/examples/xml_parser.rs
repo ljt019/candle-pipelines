@@ -24,8 +24,8 @@ fn main() -> Result<()> {
         .register_tag("tool_call")
         .build();
 
-    // Generate streaming completion (auto-uses tools if enabled)
-    let stream = pipeline.completion_stream("What's the weather like in Tokyo?")?;
+    // Generate streaming completion
+    let stream = pipeline.run_iter("What's the weather like in Tokyo?")?;
 
     // Wrap iterator with XML parser
     let event_iter = parser.wrap_iterator(stream);
