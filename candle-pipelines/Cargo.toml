@@ -1,7 +1,7 @@
 [package]
 name = "candle-pipelines"
 description = "Simple, intuitive pipelines for local LLM inference in Rust, powered by Candle. Inspired by Python's Transformers library."
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ljt019/candle-pipelines/"
@@ -16,7 +16,7 @@ schemars = { version = "0.8", features = ["derive"] }
 tracing = "0.1.41"
 rand = "0.9.1"
 candle-pipelines-macros = { path = "../candle-pipelines-macros", version = "0.0.1" }
-candle-pipelines-models = { path = "../candle-pipelines-models", version = "0.0.1" }
+candle-pipelines-models = { path = "../candle-pipelines-models", version = "0.0.2" }
 once_cell = "1.20"
 regex = "1"
 futures = "0.3.31"

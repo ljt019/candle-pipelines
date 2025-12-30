@@ -1,7 +1,7 @@
 use super::params::GenerationParams;
 use super::tools::ErrorStrategy;
 use crate::error::Result;
-use crate::models::{Gemma3, Gemma3Size, Qwen3, Qwen3Size};
+use crate::models::{Gemma3, Gemma3Size, Llama3, Llama3Size, Olmo3, Olmo3Size, Qwen3, Qwen3Size};
 use crate::pipelines::cache::{global_cache, ModelOptions};
 use crate::pipelines::utils::{build_cache_key, DeviceRequest};
 
@@ -163,6 +163,20 @@ impl TextGenerationPipelineBuilder<Qwen3> {
 impl TextGenerationPipelineBuilder<Gemma3> {
     /// Create a builder for a Gemma 3 model.
     pub fn gemma3(size: Gemma3Size) -> Self {
+        Self::new(size)
+    }
+}
+
+impl TextGenerationPipelineBuilder<Llama3> {
+    /// Create a builder for a Llama 3.2 model.
+    pub fn llama3(size: Llama3Size) -> Self {
+        Self::new(size)
+    }
+}
+
+impl TextGenerationPipelineBuilder<Olmo3> {
+    /// Create a builder for an OLMo-3 model.
+    pub fn olmo3(size: Olmo3Size) -> Self {
         Self::new(size)
     }
 }

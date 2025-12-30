@@ -1,15 +1,17 @@
 #![allow(unused_assignments)]
 
 use super::base_pipeline::BasePipeline;
+use super::llama_tool_parser::{self, LlamaToolCall, LlamaToolParser, ParseEvent};
 use super::message::Message;
 use super::model::TextGenerationModel;
 use super::model::{ModelCache, Reasoning, ToggleableReasoning};
+use super::olmo3_tool_parser::{self, Olmo3ToolCall};
 use super::params::GenerationParams;
 use super::stats::GenerationStats;
 use super::tools::{ErrorStrategy, Tool};
 use crate::error::PipelineError;
 use crate::error::Result;
-use crate::models::{Gemma3, Qwen3};
+use crate::models::{Gemma3, Llama3, Olmo3, Qwen3};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -524,24 +526,30 @@ impl<M: TextGenerationModel + ToggleableReasoning + Sync> TextGenerationPipeline
     }
 }
 
-/// A tool execution result with name and raw content.
+/// A tool execution result with name, arguments, and result.
 struct ToolResult {
     name: String,
-    content: String,
+    arguments: serde_json::Value,
+    result: String,
 }
 
 impl ToolResult {
-    /// Format for user output
+    /// Format for user output (JSON)
     fn for_user(&self) -> String {
+        let json = serde_json::json!({
+            "name": self.name,
+            "parameters": self.arguments,
+            "result": self.result
+        });
         format!(
-            "<tool_result name=\"{}\">\n{}\n</tool_result>",
-            self.name, self.content
+            "<tool_result>\n{}\n</tool_result>",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
         )
     }
 
     /// Format for model (raw content, template adds wrapping).
     fn for_model(&self) -> Message {
-        Message::tool(&self.content)
+        Message::tool(&self.result)
     }
 }
 
@@ -571,7 +579,8 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                     Ok(result) => {
                         tool_results.push(ToolResult {
                             name: call.name.clone(),
-                            content: result.trim_end_matches('\n').to_string(),
+                            arguments: args,
+                            result: result.trim_end_matches('\n').to_string(),
                         });
                         break;
                     }
@@ -583,7 +592,8 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
                                 ErrorStrategy::ReturnToModel => {
                                     tool_results.push(ToolResult {
                                         name: call.name.clone(),
-                                        content: format!("Error: {e}"),
+                                        arguments: args,
+                                        result: format!("Error: {e}"),
                                     });
                                     break;
                                 }
@@ -737,6 +747,192 @@ impl<M: TextGenerationModel + Send + Sync> TextGenerationPipeline<M> {
             done: false,
         })
     }
+
+    // ============ Llama-specific tool methods ============
+
+    /// Execute Llama-format tool calls.
+    async fn execute_llama_tool_calls(
+        &self,
+        tool_calls: Vec<LlamaToolCall>,
+        tools: &[Tool],
+    ) -> Result<Vec<ToolResult>> {
+        let mut tool_results = Vec::new();
+
+        for call in tool_calls {
+            let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+                PipelineError::Tool(format!(
+                    "Tool '{}' not found. Registered tools: {}",
+                    call.name,
+                    available_tools.join(", ")
+                ))
+            })?;
+
+            let args = call.parameters.clone();
+            let mut attempts = 0u32;
+
+            loop {
+                match tool.call(args.clone()).await {
+                    Ok(result) => {
+                        tool_results.push(ToolResult {
+                            name: call.name.clone(),
+                            arguments: args,
+                            result: result.trim_end_matches('\n').to_string(),
+                        });
+                        break;
+                    }
+                    Err(e) => {
+                        attempts += 1;
+                        if attempts >= tool.max_retries() {
+                            match &self.tool_error_strategy {
+                                ErrorStrategy::Fail => return Err(e),
+                                ErrorStrategy::ReturnToModel => {
+                                    tool_results.push(ToolResult {
+                                        name: call.name.clone(),
+                                        arguments: args,
+                                        result: format!("Error: {e}"),
+                                    });
+                                    break;
+                                }
+                            }
+                        } else {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(tool_results)
+    }
+
+    /// Internal: Llama tool-calling completion flow (non-streaming).
+    async fn completion_with_tools_llama(&self, messages: &[Message]) -> Result<Output> {
+        let tools = self.registered_tools();
+        let mut messages = messages.to_vec();
+        let mut full_response = String::new();
+        let mut combined_stats = GenerationStats::new();
+        let mut is_first_call = true;
+
+        loop {
+            let templated = self.base.model.apply_chat_template(&messages, &tools)?;
+            let new_tokens = self
+                .base
+                .model_tokenizer
+                .encode(templated.as_str(), true)
+                .map_err(|e| {
+                    PipelineError::Tokenization(format!(
+                        "Tokenization failed on '{}...': {}",
+                        templated.chars().take(50).collect::<String>(),
+                        e
+                    ))
+                })?
+                .get_ids()
+                .to_vec();
+
+            let max_seq_len = self.base.model.get_max_seq_len();
+            let pending_tokens = new_tokens.len();
+
+            let (response, stats) =
+                if self.base.cache.lock().unwrap().current_seq_len() + pending_tokens > max_seq_len
+                {
+                    self.base.cache.lock().unwrap().reset();
+                    self.base.last_processed_tokens.lock().unwrap().clear();
+                    self.base.completion_from_tokens_with_stats(&new_tokens)?
+                } else if self.base.can_reuse_cache(&new_tokens) {
+                    let prefix_len = self.base.last_processed_tokens.lock().unwrap().len();
+                    let new_portion = &new_tokens[prefix_len..];
+                    let res = self
+                        .base
+                        .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                } else {
+                    self.base.cache.lock().unwrap().reset();
+                    let res = self.base.completion_from_tokens_with_stats(&new_tokens)?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                };
+
+            // Accumulate stats from this generation
+            if is_first_call {
+                combined_stats = stats;
+                is_first_call = false;
+            } else {
+                combined_stats.accumulate(&stats);
+            }
+
+            // Extract Llama-format tool calls (raw JSON)
+            let tool_calls = llama_tool_parser::extract_tool_calls(&response);
+
+            if !tool_calls.is_empty() {
+                messages.push(super::message::Message::assistant(&response));
+
+                // Emit wrapped tool calls in Qwen-compatible XML format
+                for call in &tool_calls {
+                    let json = serde_json::json!({
+                        "name": call.name,
+                        "arguments": call.parameters
+                    });
+                    let wrapped = format!(
+                        "<tool_call>\n{}\n</tool_call>\n",
+                        serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+                    );
+                    full_response.push_str(&wrapped);
+                }
+
+                let tool_results = self.execute_llama_tool_calls(tool_calls, &tools).await?;
+
+                // Add wrapped results to user output
+                let user_output: Vec<String> = tool_results.iter().map(|r| r.for_user()).collect();
+                full_response.push('\n');
+                full_response.push_str(&user_output.join("\n"));
+                full_response.push('\n');
+
+                // Add raw results as tool messages for model
+                for result in tool_results {
+                    messages.push(result.for_model());
+                }
+                continue;
+            } else {
+                let text = if !full_response.is_empty() {
+                    full_response.push('\n');
+                    full_response.push_str(&response);
+                    full_response
+                } else {
+                    response
+                };
+                // Finalize combined stats with total time
+                combined_stats.finalize();
+                return Ok(Output {
+                    text,
+                    stats: combined_stats,
+                });
+            }
+        }
+    }
+
+    /// Create a tool-aware streaming iterator for Llama3.
+    fn run_iter_with_tools_llama(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<LlamaToolAwareIterator<'_, M>> {
+        let tools = self.active_tools();
+
+        // Create initial inner iterator using owned messages helper
+        let inner = self.run_iter_from_messages_owned(messages.clone())?;
+
+        Ok(LlamaToolAwareIterator {
+            pipeline: self,
+            messages,
+            tools,
+            inner: Some(Box::new(inner)),
+            parser: LlamaToolParser::new(),
+            response_buffer: String::new(),
+            pending_output: std::collections::VecDeque::new(),
+            done: false,
+        })
+    }
 }
 
 /// Iterator that handles tool calling during streaming generation.
@@ -851,6 +1047,162 @@ impl<'a, M: TextGenerationModel + Send + Sync> TokenIterator for ToolAwareIterat
     }
 }
 
+/// Iterator that handles Llama tool calling during streaming generation.
+///
+/// Uses state-machine parsing with brace counting to detect JSON tool calls
+/// while streaming tokens in real-time.
+struct LlamaToolAwareIterator<'a, M: TextGenerationModel + Send + Sync> {
+    pipeline: &'a TextGenerationPipeline<M>,
+    messages: Vec<Message>,
+    tools: Vec<Tool>,
+    inner: Option<Box<dyn Iterator<Item = Result<String>> + Send + 'a>>,
+    parser: LlamaToolParser,
+    response_buffer: String,
+    pending_output: std::collections::VecDeque<String>,
+    done: bool,
+}
+
+impl<M: TextGenerationModel + Send + Sync> Iterator for LlamaToolAwareIterator<'_, M> {
+    type Item = Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.done {
+                return None;
+            }
+
+            // Yield any pending output first
+            if let Some(chunk) = self.pending_output.pop_front() {
+                return Some(Ok(chunk));
+            }
+
+            // Try to get next token from inner iterator
+            if let Some(ref mut inner) = self.inner {
+                if let Some(result) = inner.next() {
+                    match result {
+                        Ok(token) => {
+                            // Buffer for final response assembly
+                            self.response_buffer.push_str(&token);
+
+                            // Process through parser for tool detection
+                            match self.parser.process_token(&token) {
+                                Some(ParseEvent::Content(content)) => {
+                                    // Stream content immediately
+                                    return Some(Ok(content));
+                                }
+                                Some(ParseEvent::Flush(content)) => {
+                                    // Buffered content wasn't a tool call, emit it
+                                    return Some(Ok(content));
+                                }
+                                Some(ParseEvent::ToolCall(call)) => {
+                                    // Tool call detected! Execute it
+                                    return self.handle_tool_call(vec![call]);
+                                }
+                                None => {
+                                    // Still buffering, continue to next token
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => return Some(Err(e)),
+                    }
+                }
+                // Inner iterator exhausted - finalize parser
+                self.inner = None;
+            }
+
+            // Inner exhausted - finalize parser to flush any buffered content
+            if let Some(event) = self.parser.finalize() {
+                match event {
+                    ParseEvent::Content(content) | ParseEvent::Flush(content) => {
+                        self.done = true;
+                        return Some(Ok(content));
+                    }
+                    ParseEvent::ToolCall(call) => {
+                        // Tool call at end of stream
+                        return self.handle_tool_call(vec![call]);
+                    }
+                }
+            }
+
+            // Nothing left, we're done
+            self.done = true;
+            return None;
+        }
+    }
+}
+
+impl<'a, M: TextGenerationModel + Send + Sync> LlamaToolAwareIterator<'a, M> {
+    fn handle_tool_call(&mut self, tool_calls: Vec<LlamaToolCall>) -> Option<Result<String>> {
+        // Add assistant message with the tool call
+        self.messages
+            .push(Message::assistant(&self.response_buffer));
+        self.response_buffer.clear();
+        self.parser.reset();
+
+        // Emit wrapped tool calls in Qwen-compatible XML format
+        for call in &tool_calls {
+            let json = serde_json::json!({
+                "name": call.name,
+                "arguments": call.parameters
+            });
+            let wrapped = format!(
+                "<tool_call>\n{}\n</tool_call>\n",
+                serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+            );
+            self.pending_output.push_back(wrapped);
+        }
+
+        // Execute tool calls
+        let tool_results = match futures::executor::block_on(
+            self.pipeline
+                .execute_llama_tool_calls(tool_calls, &self.tools),
+        ) {
+            Ok(results) => results,
+            Err(e) => {
+                self.done = true;
+                return Some(Err(e));
+            }
+        };
+
+        // Format tool results for output and model
+        let user_output: Vec<String> = tool_results.iter().map(|r| r.for_user()).collect();
+        let tool_output = format!("\n{}\n", user_output.join("\n"));
+
+        // Add raw results as tool messages for model
+        for result in tool_results {
+            self.messages.push(result.for_model());
+        }
+
+        // Queue tool output to yield
+        self.pending_output.push_back(tool_output);
+
+        // Create new inner iterator for continued generation
+        match self
+            .pipeline
+            .run_iter_from_messages_owned(self.messages.clone())
+        {
+            Ok(new_inner) => {
+                self.inner = Some(Box::new(new_inner));
+            }
+            Err(e) => {
+                self.done = true;
+                return Some(Err(e));
+            }
+        }
+
+        // Return pending output
+        self.pending_output.pop_front().map(Ok)
+    }
+}
+
+impl<'a, M: TextGenerationModel + Send + Sync> TokenIterator for LlamaToolAwareIterator<'a, M> {
+    fn stats(&self) -> GenerationStats {
+        // Stats tracking is limited for tool-aware iteration
+        GenerationStats::new()
+    }
+}
+
 // ============ Per-model inherent methods ============
 
 impl TextGenerationPipeline<Qwen3> {
@@ -903,6 +1255,43 @@ impl TextGenerationPipeline<Gemma3> {
     /// Call `.stats()` after iteration to get generation statistics.
     pub fn run_iter<'a>(&'a self, input: impl Into<Input<'a>>) -> Result<BoxedTokenIterator<'a>> {
         Ok(Box::new(self.run_iter_basic(input)?))
+    }
+}
+
+impl TextGenerationPipeline<Llama3> {
+    /// Generate a complete response synchronously.
+    ///
+    /// If tools are registered and enabled, they are executed automatically.
+    /// Tool functions (even async ones) are executed blocking since the model
+    /// must wait for tool results before continuing generation.
+    pub fn run<'a>(&self, input: impl Into<Input<'a>>) -> Result<Output> {
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            let messages = match input.into() {
+                Input::Prompt(p) => vec![Message::user(p)],
+                Input::Messages(m) => m.to_vec(),
+            };
+            futures::executor::block_on(self.completion_with_tools_llama(&messages))
+        } else {
+            self.run_basic(input)
+        }
+    }
+
+    /// Iterate over tokens as they're generated.
+    ///
+    /// If tools are registered and enabled, they are executed automatically.
+    /// Call `.stats()` after iteration to get generation statistics.
+    pub fn run_iter<'a>(&'a self, input: impl Into<Input<'a>>) -> Result<BoxedTokenIterator<'a>> {
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            let messages = match input.into() {
+                Input::Prompt(p) => vec![Message::user(p)],
+                Input::Messages(m) => m.to_vec(),
+            };
+            Ok(Box::new(self.run_iter_with_tools_llama(messages)?))
+        } else {
+            Ok(Box::new(self.run_iter_basic(input)?))
+        }
     }
 }
 
@@ -1010,6 +1399,525 @@ impl TextGeneration for TextGenerationPipeline<Gemma3> {
 
     fn clear_cache(&self) {
         TextGenerationPipeline::clear_cache(self)
+    }
+}
+
+impl TextGeneration for TextGenerationPipeline<Llama3> {
+    fn run(&self, messages: &[Message]) -> Result<Output> {
+        // Use Llama3's inherent run which handles tool execution
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            futures::executor::block_on(self.completion_with_tools_llama(messages))
+        } else {
+            self.run_basic(messages)
+        }
+    }
+
+    fn run_iter<'a>(&'a self, messages: &'a [Message]) -> Result<BoxedTokenIterator<'a>> {
+        // Use Llama3's inherent run_iter which handles tool execution
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            Ok(Box::new(self.run_iter_with_tools_llama(messages.to_vec())?))
+        } else {
+            Ok(Box::new(self.run_iter_basic(messages)?))
+        }
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    fn register_tool(&self, tool: Tool) {
+        TextGenerationPipeline::register_tool(self, tool)
+    }
+
+    fn unregister_tool(&self, name: &str) {
+        TextGenerationPipeline::unregister_tool(self, name)
+    }
+
+    fn clear_tools(&self) {
+        TextGenerationPipeline::clear_tools(self)
+    }
+
+    fn registered_tools(&self) -> Vec<Tool> {
+        TextGenerationPipeline::registered_tools(self)
+    }
+
+    fn enable_tools(&self, enable: bool) {
+        TextGenerationPipeline::enable_tools(self, enable)
+    }
+
+    fn tools_enabled(&self) -> bool {
+        TextGenerationPipeline::tools_enabled(self)
+    }
+
+    fn clear_cache(&self) {
+        TextGenerationPipeline::clear_cache(self)
+    }
+}
+
+// ============ OLMo-3 ============
+
+impl TextGenerationPipeline<Olmo3> {
+    /// Generate a complete response synchronously.
+    ///
+    /// If tools are registered and enabled, they are executed automatically.
+    pub fn run<'a>(&self, input: impl Into<Input<'a>>) -> Result<Output> {
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            let messages = match input.into() {
+                Input::Prompt(p) => vec![Message::user(p)],
+                Input::Messages(m) => m.to_vec(),
+            };
+            futures::executor::block_on(self.completion_with_tools_olmo3(&messages))
+        } else {
+            self.run_basic(input)
+        }
+    }
+
+    /// Iterate over tokens as they're generated.
+    ///
+    /// Call `.stats()` after iteration to get generation statistics.
+    pub fn run_iter<'a>(&'a self, input: impl Into<Input<'a>>) -> Result<BoxedTokenIterator<'a>> {
+        let tools = self.active_tools();
+        if !tools.is_empty() {
+            let messages = match input.into() {
+                Input::Prompt(p) => vec![Message::user(p)],
+                Input::Messages(m) => m.to_vec(),
+            };
+            Ok(Box::new(self.run_iter_with_tools_olmo3(messages)?))
+        } else {
+            Ok(Box::new(self.run_iter_basic(input)?))
+        }
+    }
+
+    /// Create a tool-aware streaming iterator for OLMo-3.
+    fn run_iter_with_tools_olmo3(
+        &self,
+        messages: Vec<Message>,
+    ) -> Result<Olmo3ToolAwareIterator<'_>> {
+        let tools = self.active_tools();
+        let inner = self.run_iter_from_messages_owned(messages.clone())?;
+
+        // Create parser that tracks function_calls tags
+        let parser = XmlParserBuilder::new()
+            .register_tag("function_calls")
+            .build();
+
+        Ok(Olmo3ToolAwareIterator {
+            pipeline: self,
+            messages,
+            tools,
+            inner: Some(Box::new(inner)),
+            parser,
+            response_buffer: String::new(),
+            pending_output: std::collections::VecDeque::new(),
+            pending_tool_calls: None,
+            done: false,
+        })
+    }
+
+    /// Execute OLMo-3 format tool calls.
+    async fn execute_olmo3_tool_calls(
+        &self,
+        tool_calls: Vec<Olmo3ToolCall>,
+        tools: &[Tool],
+    ) -> Result<Vec<ToolResult>> {
+        let mut tool_results = Vec::new();
+
+        for call in tool_calls {
+            let available_tools: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+            let tool = tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+                PipelineError::Tool(format!(
+                    "Tool '{}' not found. Registered tools: {}",
+                    call.name,
+                    available_tools.join(", ")
+                ))
+            })?;
+
+            let args = call.arguments.clone();
+            let mut attempts = 0u32;
+
+            loop {
+                match tool.call(args.clone()).await {
+                    Ok(result) => {
+                        tool_results.push(ToolResult {
+                            name: call.name.clone(),
+                            arguments: args,
+                            result: result.trim_end_matches('\n').to_string(),
+                        });
+                        break;
+                    }
+                    Err(e) => {
+                        attempts += 1;
+                        if attempts >= tool.max_retries() {
+                            match &self.tool_error_strategy {
+                                ErrorStrategy::Fail => return Err(e),
+                                ErrorStrategy::ReturnToModel => {
+                                    tool_results.push(ToolResult {
+                                        name: call.name.clone(),
+                                        arguments: args,
+                                        result: format!("Error: {e}"),
+                                    });
+                                    break;
+                                }
+                            }
+                        } else {
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(tool_results)
+    }
+
+    /// Internal: OLMo-3 tool-calling completion flow.
+    async fn completion_with_tools_olmo3(&self, messages: &[Message]) -> Result<Output> {
+        let tools = self.registered_tools();
+        let mut messages = messages.to_vec();
+        let mut full_response = String::new();
+        let mut combined_stats = GenerationStats::new();
+        let mut is_first_call = true;
+
+        loop {
+            let templated = self.base.model.apply_chat_template(&messages, &tools)?;
+            let new_tokens = self
+                .base
+                .model_tokenizer
+                .encode(templated.as_str(), true)
+                .map_err(|e| {
+                    PipelineError::Tokenization(format!(
+                        "Tokenization failed on '{}...': {}",
+                        templated.chars().take(50).collect::<String>(),
+                        e
+                    ))
+                })?
+                .get_ids()
+                .to_vec();
+
+            let max_seq_len = self.base.model.get_max_seq_len();
+            let pending_tokens = new_tokens.len();
+
+            let (response, stats) =
+                if self.base.cache.lock().unwrap().current_seq_len() + pending_tokens > max_seq_len
+                {
+                    self.base.cache.lock().unwrap().reset();
+                    self.base.last_processed_tokens.lock().unwrap().clear();
+                    self.base.completion_from_tokens_with_stats(&new_tokens)?
+                } else if self.base.can_reuse_cache(&new_tokens) {
+                    let prefix_len = self.base.last_processed_tokens.lock().unwrap().len();
+                    let new_portion = &new_tokens[prefix_len..];
+                    let res = self
+                        .base
+                        .completion_from_tokens_with_prompt_stats(new_portion, new_tokens.len())?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                } else {
+                    self.base.cache.lock().unwrap().reset();
+                    let res = self.base.completion_from_tokens_with_stats(&new_tokens)?;
+                    *self.base.last_processed_tokens.lock().unwrap() = new_tokens;
+                    res
+                };
+
+            // Accumulate stats
+            if is_first_call {
+                combined_stats = stats;
+                is_first_call = false;
+            } else {
+                combined_stats.accumulate(&stats);
+            }
+
+            // Extract OLMo-3 format tool calls
+            let tool_calls = olmo3_tool_parser::extract_tool_calls(&response);
+
+            if !tool_calls.is_empty() {
+                messages.push(Message::assistant(&response));
+
+                // Emit wrapped tool calls in XML format for output
+                for call in &tool_calls {
+                    let json = serde_json::json!({
+                        "name": call.name,
+                        "arguments": call.arguments
+                    });
+                    let wrapped = format!(
+                        "<tool_call>\n{}\n</tool_call>\n",
+                        serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+                    );
+                    full_response.push_str(&wrapped);
+                }
+
+                let tool_results = self.execute_olmo3_tool_calls(tool_calls, &tools).await?;
+
+                // Add wrapped results to user output
+                let user_output: Vec<String> = tool_results.iter().map(|r| r.for_user()).collect();
+                full_response.push('\n');
+                full_response.push_str(&user_output.join("\n"));
+                full_response.push('\n');
+
+                // Add raw results as tool messages for model
+                for result in tool_results {
+                    messages.push(result.for_model());
+                }
+                continue;
+            } else {
+                let text = if !full_response.is_empty() {
+                    full_response.push('\n');
+                    full_response.push_str(&response);
+                    full_response
+                } else {
+                    response
+                };
+                combined_stats.finalize();
+                return Ok(Output {
+                    text,
+                    stats: combined_stats,
+                });
+            }
+        }
+    }
+}
+
+impl TextGeneration for TextGenerationPipeline<Olmo3> {
+    fn run(&self, messages: &[Message]) -> Result<Output> {
+        let tools = self.registered_tools();
+        if self.tools_enabled() && !tools.is_empty() {
+            futures::executor::block_on(self.completion_with_tools_olmo3(messages))
+        } else {
+            self.run_basic(messages)
+        }
+    }
+
+    fn run_iter<'a>(&'a self, messages: &'a [Message]) -> Result<BoxedTokenIterator<'a>> {
+        <TextGenerationPipeline<Olmo3>>::run_iter(self, messages)
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    fn register_tool(&self, tool: Tool) {
+        TextGenerationPipeline::register_tool(self, tool)
+    }
+
+    fn unregister_tool(&self, name: &str) {
+        TextGenerationPipeline::unregister_tool(self, name)
+    }
+
+    fn clear_tools(&self) {
+        TextGenerationPipeline::clear_tools(self)
+    }
+
+    fn registered_tools(&self) -> Vec<Tool> {
+        TextGenerationPipeline::registered_tools(self)
+    }
+
+    fn enable_tools(&self, enable: bool) {
+        TextGenerationPipeline::enable_tools(self, enable)
+    }
+
+    fn tools_enabled(&self) -> bool {
+        TextGenerationPipeline::tools_enabled(self)
+    }
+
+    fn clear_cache(&self) {
+        TextGenerationPipeline::clear_cache(self)
+    }
+}
+
+// ============ OLMo-3 Tool-Aware Iterator ============
+
+use super::parser::{Event, TagParts, XmlParser, XmlParserBuilder};
+
+/// Iterator that handles OLMo-3 tool calling during streaming generation.
+/// Uses XmlParser to buffer `<function_calls>` content.
+struct Olmo3ToolAwareIterator<'a> {
+    pipeline: &'a TextGenerationPipeline<Olmo3>,
+    messages: Vec<Message>,
+    tools: Vec<Tool>,
+    inner: Option<Box<dyn Iterator<Item = Result<String>> + Send + 'a>>,
+    parser: XmlParser,
+    response_buffer: String,
+    pending_output: std::collections::VecDeque<String>,
+    /// Tool calls waiting to be executed (after <tool_call> has been emitted)
+    pending_tool_calls: Option<Vec<olmo3_tool_parser::Olmo3ToolCall>>,
+    done: bool,
+}
+
+impl Olmo3ToolAwareIterator<'_> {
+    /// Queue <tool_call> output and store calls for later execution
+    fn queue_tool_calls(&mut self, full_xml: &str) -> bool {
+        let tool_calls = olmo3_tool_parser::extract_tool_calls(full_xml);
+
+        if tool_calls.is_empty() {
+            return false;
+        }
+
+        // Add assistant message with the raw response
+        self.messages
+            .push(Message::assistant(&self.response_buffer));
+        self.response_buffer.clear();
+
+        // Queue <tool_call> output (emitted BEFORE execution)
+        for call in &tool_calls {
+            let json = serde_json::json!({
+                "name": call.name,
+                "arguments": call.arguments
+            });
+            self.pending_output.push_back(format!(
+                "<tool_call>\n{}\n</tool_call>\n",
+                serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+            ));
+        }
+
+        // Store for execution on next iteration
+        self.pending_tool_calls = Some(tool_calls);
+        true
+    }
+
+    /// Execute pending tool calls and queue results
+    fn execute_pending_tools(&mut self) -> Option<Result<String>> {
+        let tool_calls = self.pending_tool_calls.take()?;
+
+        // Execute tool calls
+        let tool_results = match futures::executor::block_on(
+            self.pipeline
+                .execute_olmo3_tool_calls(tool_calls, &self.tools),
+        ) {
+            Ok(results) => results,
+            Err(e) => {
+                self.done = true;
+                return Some(Err(e));
+            }
+        };
+
+        // Queue <tool_result> output
+        for result in &tool_results {
+            self.pending_output
+                .push_back(format!("{}\n", result.for_user()));
+        }
+
+        // Add raw results as tool messages for model
+        for result in tool_results {
+            self.messages.push(result.for_model());
+        }
+
+        // Create new inner iterator for continued generation
+        self.parser.reset();
+        match self
+            .pipeline
+            .run_iter_from_messages_owned(self.messages.clone())
+        {
+            Ok(new_inner) => {
+                self.inner = Some(Box::new(new_inner));
+            }
+            Err(e) => {
+                self.done = true;
+                return Some(Err(e));
+            }
+        }
+
+        // Return first pending output (tool_result)
+        self.pending_output.pop_front().map(Ok)
+    }
+}
+
+impl Iterator for Olmo3ToolAwareIterator<'_> {
+    type Item = Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.done {
+                return None;
+            }
+
+            // Yield any pending output first (tool_call tags)
+            if let Some(chunk) = self.pending_output.pop_front() {
+                return Some(Ok(chunk));
+            }
+
+            // If we have pending tool calls and no more output, execute them now
+            if self.pending_tool_calls.is_some() {
+                if let Some(result) = self.execute_pending_tools() {
+                    return Some(result);
+                }
+                continue;
+            }
+
+            // Try to get next token from inner iterator
+            if let Some(ref mut inner) = self.inner {
+                if let Some(result) = inner.next() {
+                    match result {
+                        Ok(token) => {
+                            self.response_buffer.push_str(&token);
+                            let events = self.parser.parse_token(&token);
+
+                            for event in events {
+                                match &event {
+                                    Event::Output {
+                                        part: TagParts::Content,
+                                        content,
+                                    } => {
+                                        self.pending_output.push_back(content.clone());
+                                    }
+                                    Event::Tagged {
+                                        tag,
+                                        part: TagParts::End,
+                                        content,
+                                    } if tag == "function_calls" => {
+                                        // Queue tool_call output, store calls for later
+                                        self.queue_tool_calls(content);
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            if let Some(chunk) = self.pending_output.pop_front() {
+                                return Some(Ok(chunk));
+                            }
+                            continue;
+                        }
+                        Err(e) => return Some(Err(e)),
+                    }
+                }
+                self.inner = None;
+            }
+
+            // Flush parser
+            let events = self.parser.flush();
+            for event in events {
+                match &event {
+                    Event::Output {
+                        part: TagParts::Content,
+                        content,
+                    } => {
+                        self.pending_output.push_back(content.clone());
+                    }
+                    Event::Tagged {
+                        tag,
+                        part: TagParts::End,
+                        content,
+                    } if tag == "function_calls" => {
+                        self.queue_tool_calls(content);
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(chunk) = self.pending_output.pop_front() {
+                return Some(Ok(chunk));
+            }
+
+            self.done = true;
+            return None;
+        }
+    }
+}
+
+impl TokenIterator for Olmo3ToolAwareIterator<'_> {
+    fn stats(&self) -> GenerationStats {
+        GenerationStats::new()
     }
 }
 

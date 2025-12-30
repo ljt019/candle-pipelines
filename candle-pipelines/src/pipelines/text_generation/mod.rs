@@ -6,10 +6,10 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3Size};
+//! use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Olmo3Size};
 //!
 //! # fn main() -> candle_pipelines::error::Result<()> {
-//! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
+//! let pipeline = TextGenerationPipelineBuilder::olmo3(Olmo3Size::Size7B)
 //!     .build()?;
 //!
 //! let output = pipeline.run("Explain quantum computing briefly.")?;
@@ -143,13 +143,17 @@
 //! |-------|-------|----------------|
 //! | Qwen3 | `0.6B`, `1.7B`, `4B`, `8B`, `14B`, `32B` | [`TextGenerationPipelineBuilder::qwen3`] |
 //! | Gemma3 | `1B`, `4B`, `12B`, `27B` | [`TextGenerationPipelineBuilder::gemma3`] |
+//! | Llama 3.2 | `1B`, `3B` | [`TextGenerationPipelineBuilder::llama3`] |
+//! | OLMo-3 | `7B`, `32B` | [`TextGenerationPipelineBuilder::olmo3`] |
 
 // ============ Internal API ============
 
 pub(crate) mod base_pipeline;
 pub(crate) mod builder;
+pub(crate) mod llama_tool_parser;
 pub(crate) mod message;
 pub(crate) mod model;
+pub(crate) mod olmo3_tool_parser;
 pub(crate) mod params;
 pub(crate) mod parser;
 pub(crate) mod pipeline;
@@ -165,7 +169,7 @@ pub use tools::ToolFuture;
 
 // ============ Public API ============
 
-pub use crate::models::{Gemma3, Gemma3Size, Qwen3, Qwen3Size};
+pub use crate::models::{Gemma3, Gemma3Size, Llama3, Llama3Size, Olmo3, Olmo3Size, Qwen3, Qwen3Size};
 pub use builder::TextGenerationPipelineBuilder;
 pub use candle_pipelines_macros::{tool, tools};
 pub use message::Message;

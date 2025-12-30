@@ -22,4 +22,6 @@
 //! Share `Arc<ModelWeights>` across conversations, each gets its own `Cache`.
 
 pub mod quantized_gemma3;
+pub mod quantized_llama;
+pub mod quantized_olmo3;
 pub mod quantized_qwen3;

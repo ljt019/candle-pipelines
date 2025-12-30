@@ -1,15 +1,14 @@
 use candle_pipelines::error::Result;
-use candle_pipelines::text_generation::{Message, Qwen3Size, TextGenerationPipelineBuilder};
+use candle_pipelines::text_generation::{Message, Olmo3Size, TextGenerationPipelineBuilder};
 
 fn main() -> Result<()> {
     println!("Building pipeline...");
 
     // Start by creating the pipeline, using the builder to configure any generation parameters.
     // Parameters are optional, defaults are set to good values for each model.
-    let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3Size::Size0_6B)
-        .temperature(0.7)
-        .top_k(40)
-        .max_len(1024)
+    let pipeline = TextGenerationPipelineBuilder::olmo3(Olmo3Size::Size7B)
+        .cuda(0)
+        .max_len(512)
         .build()?;
 
     println!("Pipeline built successfully.");

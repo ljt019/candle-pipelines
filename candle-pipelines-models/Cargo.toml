@@ -1,6 +1,6 @@
 [package]
 name = "candle-pipelines-models"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "Custom model implementations for candle-pipelines (patches for candle-transformers)"
 license = "MIT OR Apache-2.0"
