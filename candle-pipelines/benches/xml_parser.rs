@@ -3,7 +3,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use candle_pipelines::text_generation::XmlParserBuilder;
 
 fn bench_parse_simple(c: &mut Criterion) {
-    let parser = XmlParserBuilder::new().register_tag("think").build();
+    let mut parser = XmlParserBuilder::new().register_tag("think").build();
     let input = "<think>Hello world</think>";
 
     c.bench_function("parse_simple", |b| {
@@ -12,7 +12,7 @@ fn bench_parse_simple(c: &mut Criterion) {
 }
 
 fn bench_parse_sizes(c: &mut Criterion) {
-    let parser = XmlParserBuilder::new().register_tag("think").build();
+    let mut parser = XmlParserBuilder::new().register_tag("think").build();
     let mut group = c.benchmark_group("parse_content_size");
 
     for size in [10, 100, 1000, 10000] {
@@ -32,7 +32,7 @@ fn bench_parse_many_tags(c: &mut Criterion) {
         for i in 0..tag_count {
             builder = builder.register_tag(format!("tag{}", i));
         }
-        let parser = builder.build();
+        let mut parser = builder.build();
         let input = "<tag0>content</tag0>";
 
         group.bench_with_input(
@@ -45,7 +45,7 @@ fn bench_parse_many_tags(c: &mut Criterion) {
 }
 
 fn bench_streaming_tokens(c: &mut Criterion) {
-    let parser = XmlParserBuilder::new().register_tag("think").build();
+    let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
     // Simulate LLM token output - small chunks
     let tokens: Vec<&str> = vec!["<", "think", ">", "Hello", " ", "world", "</", "think", ">"];
@@ -62,7 +62,7 @@ fn bench_streaming_tokens(c: &mut Criterion) {
 }
 
 fn bench_worst_case_many_angles(c: &mut Criterion) {
-    let parser = XmlParserBuilder::new().register_tag("think").build();
+    let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
     // Many < that aren't tags - forces parser to check each one
     let input = "a < b < c < d < e < f <think>x</think>";

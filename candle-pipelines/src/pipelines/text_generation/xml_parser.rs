@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tag {
@@ -211,7 +210,7 @@ impl Event {
 /// # Example
 ///
 /// ```rust,ignore
-/// let parser = XmlParserBuilder::new()
+/// let mut parser = XmlParserBuilder::new()
 ///     .register_tag("think")
 ///     .register_tag("answer")
 ///     .build();
@@ -250,7 +249,7 @@ impl XmlParserBuilder {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct ParserState {
     /// (tag_name, content, attributes)
     open_tags: Vec<(String, String, HashMap<String, String>)>,
@@ -261,15 +260,31 @@ struct ParserState {
     emitted_tag_lens: std::collections::HashMap<String, usize>,
 }
 
+impl Default for ParserState {
+    fn default() -> Self {
+        Self {
+            open_tags: Vec::with_capacity(4),
+            content_buffer: String::with_capacity(1024),
+            tag_buffer: String::with_capacity(64),
+            in_tag: false,
+            emitted_top_len: 0,
+            emitted_tag_lens: HashMap::with_capacity(4),
+        }
+    }
+}
+
 /// Streaming XML parser for extracting structured content from LLM output.
 ///
 /// Parses text containing XML-like tags and emits events for tag boundaries
 /// and content. Useful for structured output like `<think>...</think>` blocks.
+///
+/// **Note:** This parser is `!Sync`. If you need to share it across threads,
+/// wrap it in a `Mutex` or `RwLock`.
 #[derive(Debug, Clone)]
 pub struct XmlParser {
     registered_tags: HashSet<String>,
     tag_map: HashMap<String, Tag>,
-    state: Arc<Mutex<ParserState>>,
+    state: ParserState,
 }
 
 impl XmlParser {
@@ -278,106 +293,101 @@ impl XmlParser {
         Self {
             registered_tags: tags,
             tag_map,
-            state: Arc::new(Mutex::new(ParserState::default())),
+            state: ParserState::default(),
         }
     }
 
     /// Reset parser state for a new parsing session.
-    pub fn reset(&self) {
-        *self.state.lock().expect("parser lock poisoned") = ParserState::default();
+    pub fn reset(&mut self) {
+        self.state = ParserState::default();
     }
 
     /// Parse a complete text string and return all events.
-    pub fn parse(&self, text: &str) -> Vec<Event> {
+    pub fn parse(&mut self, text: &str) -> Vec<Event> {
         self.reset();
         let mut events = Vec::new();
 
-        for char in text.chars() {
-            let mut evs = self.process_char(char);
-            events.append(&mut evs);
+        for c in text.chars() {
+            events.extend(self.process_char_internal(c));
         }
 
-        events.extend(self.flush());
+        events.extend(self.flush_internal());
         events
     }
 
     /// Parse a single token in streaming mode. Call `flush()` when done.
-    pub fn parse_token(&self, token: &str) -> Vec<Event> {
+    pub fn parse_token(&mut self, token: &str) -> Vec<Event> {
         let mut events = Vec::new();
 
-        for char in token.chars() {
-            let mut evs = self.process_char(char);
-            events.append(&mut evs);
+        for c in token.chars() {
+            events.extend(self.process_char_internal(c));
         }
 
-        {
-            let mut state = self.state.lock().expect("parser lock poisoned");
-
-            // Emit plain content as it comes in
-            if state.open_tags.is_empty() {
-                let current_len = state.content_buffer.len();
-                if current_len > state.emitted_top_len {
-                    let new_slice = &state.content_buffer[state.emitted_top_len..];
-                    if !new_slice.is_empty() {
-                        events.push(Event::content(new_slice));
-                    }
-                    state.emitted_top_len = current_len;
+        // Emit plain content as it comes in
+        if self.state.open_tags.is_empty() {
+            let current_len = self.state.content_buffer.len();
+            if current_len > self.state.emitted_top_len {
+                let new_slice = &self.state.content_buffer[self.state.emitted_top_len..];
+                if !new_slice.is_empty() {
+                    events.push(Event::content(new_slice));
                 }
-            } else if let Some((tag_name_ref, content_ref, attrs_ref)) = state.open_tags.last() {
-                // Emit tagged content as it comes in
-                let tag_name = tag_name_ref.clone();
-                let content = content_ref.clone();
-                let attrs = attrs_ref.clone();
-                let total_len = content.len();
+                self.state.emitted_top_len = current_len;
+            }
+        } else if let Some((tag_name_ref, content_ref, attrs_ref)) = self.state.open_tags.last() {
+            // Emit tagged content as it comes in
+            let tag_name = tag_name_ref.clone();
+            let content = content_ref.clone();
+            let attrs = attrs_ref.clone();
+            let total_len = content.len();
 
-                let already_emitted = *state.emitted_tag_lens.get(&tag_name).unwrap_or(&0);
+            let already_emitted = *self.state.emitted_tag_lens.get(&tag_name).unwrap_or(&0);
 
-                if total_len > already_emitted {
-                    let new_slice = &content[already_emitted..];
-                    if !new_slice.is_empty() {
-                        if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                            events.push(Event::tagged_internal(
-                                tag_handle.clone(),
-                                new_slice,
-                                attrs.clone(),
-                            ));
-                        }
+            if total_len > already_emitted {
+                let new_slice = &content[already_emitted..];
+                if !new_slice.is_empty() {
+                    if let Some(tag_handle) = self.tag_map.get(&tag_name) {
+                        events.push(Event::tagged_internal(
+                            tag_handle.clone(),
+                            new_slice,
+                            attrs.clone(),
+                        ));
                     }
-                    state.emitted_tag_lens.insert(tag_name.clone(), total_len);
                 }
+                self.state
+                    .emitted_tag_lens
+                    .insert(tag_name.clone(), total_len);
             }
         }
 
         events
     }
 
-    fn process_char(&self, c: char) -> Vec<Event> {
+    fn process_char_internal(&mut self, c: char) -> Vec<Event> {
         let mut events = Vec::new();
-        let mut state = self.state.lock().expect("parser lock poisoned");
 
         match c {
             '<' => {
-                state.in_tag = true;
-                state.tag_buffer.clear();
-                state.tag_buffer.push(c);
+                self.state.in_tag = true;
+                self.state.tag_buffer.clear();
+                self.state.tag_buffer.push(c);
             }
-            '>' if state.in_tag => {
-                state.tag_buffer.push(c);
-                state.in_tag = false;
+            '>' if self.state.in_tag => {
+                self.state.tag_buffer.push(c);
+                self.state.in_tag = false;
 
-                let tag_content = state.tag_buffer.clone();
-                state.tag_buffer.clear();
+                let tag_content = self.state.tag_buffer.clone();
+                self.state.tag_buffer.clear();
 
-                events.extend(self.handle_tag(&mut state, &tag_content));
+                events.extend(self.handle_tag(&tag_content));
             }
-            _ if state.in_tag => {
-                state.tag_buffer.push(c);
+            _ if self.state.in_tag => {
+                self.state.tag_buffer.push(c);
             }
             _ => {
-                if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+                if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
                     content.push(c);
                 } else {
-                    state.content_buffer.push(c);
+                    self.state.content_buffer.push(c);
                 }
             }
         }
@@ -385,19 +395,19 @@ impl XmlParser {
         events
     }
 
-    fn handle_tag(&self, state: &mut ParserState, tag_content: &str) -> Vec<Event> {
+    fn handle_tag(&mut self, tag_content: &str) -> Vec<Event> {
         let mut events = Vec::new();
 
         if let Some(tag_name) = self.parse_tag_name(tag_content) {
             if self.registered_tags.contains(&tag_name) {
                 if tag_content.starts_with("</") {
                     // Closing tag - only close if it matches the outermost open tag
-                    if let Some((outermost_name, _, _)) = state.open_tags.first() {
+                    if let Some((outermost_name, _, _)) = self.state.open_tags.first() {
                         if outermost_name == &tag_name {
                             // Matches outermost - close it
-                            let (_, content, attrs) = state.open_tags.remove(0);
+                            let (_, content, attrs) = self.state.open_tags.remove(0);
                             let already_emitted =
-                                state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
+                                self.state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
 
                             if let Some(tag_handle) = self.tag_map.get(&tag_name) {
                                 // Emit any remaining content
@@ -416,24 +426,24 @@ impl XmlParser {
                             }
                         } else {
                             // Doesn't match outermost - treat as content (greedy)
-                            if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+                            if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
                                 content.push_str(tag_content);
                             }
                         }
                     } else {
                         // No open tags - closing tag becomes plain content
-                        state.content_buffer.push_str(tag_content);
+                        self.state.content_buffer.push_str(tag_content);
                     }
                 } else if tag_content.ends_with("/>") {
                     // Self-closing tag
-                    if state.open_tags.is_empty() {
+                    if self.state.open_tags.is_empty() {
                         // Emit any buffered plain content first
-                        if !state.content_buffer.is_empty() {
-                            let content = &state.content_buffer[state.emitted_top_len..];
+                        if !self.state.content_buffer.is_empty() {
+                            let content = &self.state.content_buffer[self.state.emitted_top_len..];
                             if !content.is_empty() {
                                 events.push(Event::content(content));
                             }
-                            state.emitted_top_len = state.content_buffer.len();
+                            self.state.emitted_top_len = self.state.content_buffer.len();
                         }
 
                         let attrs = self.parse_attributes(tag_content);
@@ -448,25 +458,25 @@ impl XmlParser {
                         }
                     } else {
                         // Inside another tag - treat as content (greedy)
-                        if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+                        if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
                             content.push_str(tag_content);
                         }
                     }
                 } else {
                     // Opening tag
-                    if state.open_tags.is_empty() {
+                    if self.state.open_tags.is_empty() {
                         // Only open new tags at top level (greedy parsing)
                         // Emit any buffered plain content first
-                        if !state.content_buffer.is_empty() {
-                            let content = &state.content_buffer[state.emitted_top_len..];
+                        if !self.state.content_buffer.is_empty() {
+                            let content = &self.state.content_buffer[self.state.emitted_top_len..];
                             if !content.is_empty() {
                                 events.push(Event::content(content));
                             }
-                            state.emitted_top_len = state.content_buffer.len();
+                            self.state.emitted_top_len = self.state.content_buffer.len();
                         }
 
                         let attrs = self.parse_attributes(tag_content);
-                        state
+                        self.state
                             .open_tags
                             .push((tag_name.clone(), String::new(), attrs.clone()));
 
@@ -475,19 +485,19 @@ impl XmlParser {
                         }
                     } else {
                         // Inside another tag - treat as content (greedy)
-                        if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+                        if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
                             content.push_str(tag_content);
                         }
                     }
                 }
-            } else if state.open_tags.is_empty() {
-                state.content_buffer.push_str(tag_content);
-            } else if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+            } else if self.state.open_tags.is_empty() {
+                self.state.content_buffer.push_str(tag_content);
+            } else if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
                 content.push_str(tag_content);
             }
-        } else if state.open_tags.is_empty() {
-            state.content_buffer.push_str(tag_content);
-        } else if let Some((_, ref mut content, _)) = state.open_tags.last_mut() {
+        } else if self.state.open_tags.is_empty() {
+            self.state.content_buffer.push_str(tag_content);
+        } else if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
             content.push_str(tag_content);
         }
 
@@ -602,24 +612,27 @@ impl XmlParser {
     }
 
     /// Flush any remaining buffered content as events.
-    pub fn flush(&self) -> Vec<Event> {
-        let mut state = self.state.lock().expect("parser lock poisoned");
+    pub fn flush(&mut self) -> Vec<Event> {
+        self.flush_internal()
+    }
+
+    fn flush_internal(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
 
         // Emit any remaining plain content
-        if state.content_buffer.len() > state.emitted_top_len {
-            let remaining = &state.content_buffer[state.emitted_top_len..];
+        if self.state.content_buffer.len() > self.state.emitted_top_len {
+            let remaining = &self.state.content_buffer[self.state.emitted_top_len..];
             if !remaining.is_empty() {
                 events.push(Event::content(remaining));
             }
         }
-        state.content_buffer.clear();
-        state.emitted_top_len = 0;
+        self.state.content_buffer.clear();
+        self.state.emitted_top_len = 0;
 
         // Emit remaining content for any unclosed tags (but no End event since they weren't closed)
-        let drained: Vec<_> = state.open_tags.drain(..).collect();
+        let drained: Vec<_> = self.state.open_tags.drain(..).collect();
         for (tag_name, content, attrs) in drained {
-            let already_emitted = state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
+            let already_emitted = self.state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
 
             if let Some(tag_handle) = self.tag_map.get(&tag_name) {
                 if content.len() > already_emitted {
@@ -649,7 +662,7 @@ impl XmlParser {
     /// Use this to compose XML parsing with any text generation iterator:
     ///
     /// ```rust,ignore
-    /// let parser = XmlParserBuilder::new().register_tag("think").build();
+    /// let mut parser = XmlParserBuilder::new().register_tag("think").build();
     /// let tokens = pipeline.run_iter("...")?;
     /// let events = parser.parse_iter(tokens);
     ///
@@ -680,7 +693,7 @@ pub struct EventIterator<I> {
 }
 
 impl<I> EventIterator<I> {
-    fn new(parser: XmlParser, iter: I) -> Self {
+    fn new(mut parser: XmlParser, iter: I) -> Self {
         parser.reset();
         Self {
             parser,
@@ -740,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_plain_text_only_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "Regular content";
         let events = parser.parse(&text);
@@ -752,7 +765,7 @@ mod tests {
 
     #[test]
     fn test_empty_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "";
         let events = parser.parse(&text);
@@ -762,7 +775,7 @@ mod tests {
 
     #[test]
     fn test_whitespace_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "  ";
         let events = parser.parse(&text);
@@ -774,7 +787,7 @@ mod tests {
 
     #[test]
     fn test_single_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world</think>";
         let events = parser.parse(&text);
@@ -795,7 +808,7 @@ mod tests {
 
     #[test]
     fn test_plain_text_and_single_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world</think>Regular content";
         let events = parser.parse(&text);
@@ -817,7 +830,7 @@ mod tests {
 
     #[test]
     fn test_plain_text_before_and_after_single_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "How are <think>Hello world</think>you doing today?";
         let events = parser.parse(&text);
@@ -849,7 +862,7 @@ mod tests {
 
     #[test]
     fn test_multiple_tags_parsing() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("think")
             .register_tag("answer")
             .build();
@@ -884,7 +897,7 @@ mod tests {
 
     #[test]
     fn test_empty_tags_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think></think>Regular content";
         let events = parser.parse(&text);
@@ -905,7 +918,7 @@ mod tests {
 
     #[test]
     fn test_unregistered_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("answer").build();
+        let mut parser = XmlParserBuilder::new().register_tag("answer").build();
 
         let text = "<think>Hm the answer to 1 + 1 is 2</think><answer>2</answer>";
         let events = parser.parse(&text);
@@ -931,7 +944,7 @@ mod tests {
 
     #[test]
     fn test_is_greedy_parsing() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("think")
             .register_tag("answer")
             .build();
@@ -958,7 +971,7 @@ mod tests {
 
     #[test]
     fn test_greedy_multiple_same_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world<think>Regular content</think></think>";
         let events = parser.parse(&text);
@@ -988,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_greedy_multiple_same_open_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world<think> Regular content</think>";
         let events = parser.parse(&text);
@@ -1017,7 +1030,7 @@ mod tests {
 
     #[test]
     fn test_mismatched_close_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hm I think the answer to 1 + 1 is 2</answer>";
         let events = parser.parse(&text);
@@ -1041,7 +1054,7 @@ mod tests {
 
     #[test]
     fn test_unclosed_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hm I think the answer to 1 + 1 is 2";
         let events = parser.parse(&text);
@@ -1065,7 +1078,7 @@ mod tests {
 
     #[test]
     fn test_self_closing_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think/>Regular Content<think />";
         let events = parser.parse(&text);
@@ -1088,7 +1101,7 @@ mod tests {
 
     #[test]
     fn test_multiple_same_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world</think><think>Regular content</think>";
 
@@ -1117,7 +1130,7 @@ mod tests {
 
     #[test]
     fn test_reset_isolation() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("think")
             .register_tag("answer")
             .build();
@@ -1143,7 +1156,7 @@ mod tests {
 
     #[test]
     fn test_no_attributes_returns_none() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "<think>Hello world</think>Regular content";
 
@@ -1155,7 +1168,7 @@ mod tests {
 
     #[test]
     fn test_attribute_no_quotes() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1172,7 +1185,7 @@ mod tests {
 
     #[test]
     fn test_attributes_self_closing_tag_parsing() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1188,7 +1201,7 @@ mod tests {
 
     #[test]
     fn test_attribute_double_quotes() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1205,7 +1218,7 @@ mod tests {
 
     #[test]
     fn test_attribute_single_quotes() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1222,7 +1235,7 @@ mod tests {
 
     #[test]
     fn test_attribute_quotes_with_spaces() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1239,7 +1252,7 @@ mod tests {
 
     #[test]
     fn test_multiple_attributes() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1260,7 +1273,7 @@ mod tests {
 
     #[test]
     fn test_attributes_persist_across_tag_sequence() {
-        let parser = XmlParserBuilder::new()
+        let mut parser = XmlParserBuilder::new()
             .register_tag("function_call")
             .build();
 
@@ -1280,7 +1293,7 @@ mod tests {
 
     #[test]
     fn test_attribute_returns_none_for_plain_content() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
         let text = "Regular content";
 
