@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 
 use crate::models::capabilities::{ParseEvent, ToolCallInvocation, ToolCallParser};
-use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlParserBuilder}; 
+use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlParserBuilder};
 
 /// Parser for Qwen3's XML-wrapped JSON tool call format.
 ///
@@ -32,9 +32,7 @@ impl Default for Qwen3Parser {
 impl Qwen3Parser {
     /// Create a new Qwen3 tool call parser.
     pub fn new() -> Self {
-        let xml_parser = XmlParserBuilder::new()
-            .register_tag("tool_call")
-            .build();
+        let xml_parser = XmlParserBuilder::new().register_tag("tool_call").build();
 
         Self {
             xml_parser,
@@ -45,7 +43,9 @@ impl Qwen3Parser {
     /// Process an XmlParser event and convert to ParseEvent.
     fn process_xml_event(&mut self, event: Event) -> Option<ParseEvent> {
         match &event {
-            Event::Tagged { tag, part, content, .. } if tag == "tool_call" => {
+            Event::Tagged {
+                tag, part, content, ..
+            } if tag == "tool_call" => {
                 match part {
                     TagParts::Start => {
                         // Tool call starting - continue buffering
@@ -74,14 +74,13 @@ impl Qwen3Parser {
                     _ => None,
                 }
             }
-            Event::Output { part, content } => {
-                // Regular output - emit as text
-                match part {
-                    TagParts::Content if !content.is_empty() => Some(ParseEvent::text(content)),
-                    _ => None,
+            Event::Output { content } => {
+                if !content.is_empty() {
+                    Some(ParseEvent::text(content))
+                } else {
+                    None
                 }
             }
-            Event::Error { message } => Some(ParseEvent::error(message)),
         }
     }
 
@@ -145,7 +144,9 @@ impl ToolCallParser for Qwen3Parser {
         }
 
         // Return first pending event (FIFO), or Continue
-        self.pending_events.pop_front().unwrap_or(ParseEvent::Continue)
+        self.pending_events
+            .pop_front()
+            .unwrap_or(ParseEvent::Continue)
     }
 
     fn flush(&mut self) -> Option<ParseEvent> {
@@ -227,11 +228,7 @@ mod tests {
         }
 
         let event = result.expect("should have a result");
-        assert!(
-            event.is_malformed(),
-            "Expected malformed, got {:?}",
-            event
-        );
+        assert!(event.is_malformed(), "Expected malformed, got {:?}", event);
 
         let error = event.as_malformed().unwrap();
         assert!(error.reason.contains("Invalid JSON"));
@@ -266,7 +263,8 @@ mod tests {
     fn test_text_before_tool_call() {
         let mut parser = Qwen3Parser::new();
 
-        let input = r#"Here is the result: <tool_call>{"name": "test", "arguments": {}}</tool_call>"#;
+        let input =
+            r#"Here is the result: <tool_call>{"name": "test", "arguments": {}}</tool_call>"#;
 
         let mut events = Vec::new();
         for c in input.chars() {

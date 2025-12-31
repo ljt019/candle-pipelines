@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     println!("\n--- Events ---");
 
     for event in events {
+        let event = event?; // Propagate errors
         match event.tag() {
             Some("think") => match event.part() {
                 TagParts::Start => println!("[THINKING]"),

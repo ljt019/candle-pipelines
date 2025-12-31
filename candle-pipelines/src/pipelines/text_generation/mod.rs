@@ -123,9 +123,10 @@
 //!
 //! // Wrap the token iterator with XML parsing
 //! let tokens = pipeline.run_iter("Solve 2+2. Think step by step.")?;
-//! let events = parser.parse(tokens);
+//! let events = parser.parse_iter(tokens);
 //!
 //! for event in events {
+//!     let event = event?; // Propagate errors
 //!     match (event.tag(), event.part()) {
 //!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
 //!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),

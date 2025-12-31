@@ -45,18 +45,17 @@ fn bench_parse_many_tags(c: &mut Criterion) {
 }
 
 fn bench_streaming_tokens(c: &mut Criterion) {
-    let mut parser = XmlParserBuilder::new().register_tag("think").build();
-
-    // Simulate LLM token output - small chunks
-    let tokens: Vec<&str> = vec!["<", "think", ">", "Hello", " ", "world", "</", "think", ">"];
+    let parser = XmlParserBuilder::new().register_tag("think").build();
 
     c.bench_function("streaming_tokens", |b| {
         b.iter(|| {
-            parser.reset();
-            for token in &tokens {
-                let _ = black_box(parser.parse_token(token));
-            }
-            black_box(parser.flush())
+            // Simulate LLM token output - small chunks
+            let tokens = ["<", "think", ">", "Hello", " ", "world", "</", "think", ">"]
+                .into_iter()
+                .map(|s| Ok::<_, candle_pipelines::error::PipelineError>(s.to_string()));
+
+            let events: Vec<_> = parser.parse_iter(black_box(tokens)).collect();
+            black_box(events)
         })
     });
 }

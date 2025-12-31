@@ -56,5 +56,5 @@ Run Tests, including slower inference ones:
 Run Benchmarks:
 `cargo bench`
 
-Create docs at 'file:///C:/Users/lucie/Desktop/projects/personal/candle-pipelines/target/doc/candle_pipelines/:
+Create docs at './target/doc/candle_pipelines/:
 `cargo doc --no-deps`

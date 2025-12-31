@@ -3,16 +3,11 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tag {
     name: String,
-    id: usize,
 }
 
 impl Tag {
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn id(&self) -> usize {
-        self.id
     }
 }
 
@@ -67,15 +62,8 @@ pub enum Event {
     },
     /// Content outside any registered tags (plain output).
     Output {
-        /// Which part of the output (start, content, end).
-        part: TagParts,
         /// The content/text.
         content: String,
-    },
-    /// An error occurred in the underlying stream.
-    Error {
-        /// The error message.
-        message: String,
     },
 }
 
@@ -94,15 +82,14 @@ impl Event {
         }
     }
 
-    fn plain(part: TagParts, content: impl Into<String>) -> Self {
+    fn plain(content: impl Into<String>) -> Self {
         Self::Output {
-            part,
             content: content.into(),
         }
     }
 
     pub(crate) fn content(content: impl Into<String>) -> Self {
-        Self::plain(TagParts::Content, content)
+        Self::plain(content)
     }
 
     pub(crate) fn start(
@@ -129,31 +116,10 @@ impl Event {
         Self::tagged(tag, TagParts::Content, content, attributes)
     }
 
-    /// Create an error event.
-    pub fn error(message: impl Into<String>) -> Self {
-        Self::Error {
-            message: message.into(),
-        }
-    }
-
-    /// Returns true if this is an error event.
-    pub fn is_error(&self) -> bool {
-        matches!(self, Self::Error { .. })
-    }
-
-    /// Get the error message if this is an error event.
-    pub fn error_message(&self) -> Option<&str> {
-        match self {
-            Self::Error { message } => Some(message),
-            _ => None,
-        }
-    }
-
     /// Get the content/text of this event.
     pub fn get_content(&self) -> &str {
         match self {
             Self::Tagged { content, .. } | Self::Output { content, .. } => content,
-            Self::Error { message } => message,
         }
     }
 
@@ -161,20 +127,21 @@ impl Event {
     pub fn tag(&self) -> Option<&str> {
         match self {
             Self::Tagged { tag, .. } => Some(tag.name()),
-            Self::Output { .. } | Self::Error { .. } => None,
+            Self::Output { .. } => None,
         }
     }
 
-    /// Get which part of the tag/output this event represents.
+    /// Get which part of the tag this event represents.
+    /// Returns `Content` for plain output events.
     pub fn part(&self) -> TagParts {
         match self {
-            Self::Tagged { part, .. } | Self::Output { part, .. } => *part,
-            Self::Error { .. } => TagParts::End, // Error terminates
+            Self::Tagged { part, .. } => *part,
+            Self::Output { .. } => TagParts::Content,
         }
     }
 
     /// Get attributes if this is a tagged event with attributes.
-    /// Returns None for Output/Error events, or tagged events with no attributes.
+    /// Returns None for Output events, or tagged events with no attributes.
     pub fn attributes(&self) -> Option<&HashMap<String, String>> {
         match self {
             Self::Tagged { attributes, .. } if !attributes.is_empty() => Some(attributes),
@@ -218,7 +185,6 @@ impl Event {
 #[derive(Debug, Default)]
 pub struct XmlParserBuilder {
     tags: Vec<String>,
-    next_id: usize,
 }
 
 impl XmlParserBuilder {
@@ -228,10 +194,12 @@ impl XmlParserBuilder {
     }
 
     /// Register a tag name for the parser to track. Returns self for chaining.
+    /// Registering the same tag twice is idempotent.
     pub fn register_tag(mut self, tag: impl Into<String>) -> Self {
         let name = tag.into();
-        self.next_id += 1;
-        self.tags.push(name);
+        if !self.tags.contains(&name) {
+            self.tags.push(name);
+        }
         self
     }
 
@@ -240,9 +208,9 @@ impl XmlParserBuilder {
         let mut tag_map = HashMap::new();
         let mut tags_set = HashSet::new();
 
-        for (id, name) in self.tags.into_iter().enumerate() {
+        for name in self.tags {
             tags_set.insert(name.clone());
-            tag_map.insert(name.clone(), Tag { name, id });
+            tag_map.insert(name.clone(), Tag { name });
         }
 
         XmlParser::new(tags_set, tag_map)
@@ -316,7 +284,7 @@ impl XmlParser {
     }
 
     /// Parse a single token in streaming mode. Call `flush()` when done.
-    pub fn parse_token(&mut self, token: &str) -> Vec<Event> {
+    pub(crate) fn parse_token(&mut self, token: &str) -> Vec<Event> {
         let mut events = Vec::new();
 
         for c in token.chars() {
@@ -399,17 +367,28 @@ impl XmlParser {
         let mut events = Vec::new();
 
         if let Some(tag_name) = self.parse_tag_name(tag_content) {
-            if self.registered_tags.contains(&tag_name) {
+            // Use trimmed name for registration lookup (whitespace-insensitive matching)
+            let trimmed_name = tag_name.trim().to_string();
+            if self.registered_tags.contains(&trimmed_name) {
+                // Create tag handle with original name (preserving whitespace)
+                let tag_handle = self.tag_map.get(&trimmed_name).map(|_| Tag {
+                    name: tag_name.clone(),
+                });
+
                 if tag_content.starts_with("</") {
                     // Closing tag - only close if it matches the outermost open tag
                     if let Some((outermost_name, _, _)) = self.state.open_tags.first() {
-                        if outermost_name == &tag_name {
+                        // Compare trimmed names for matching
+                        if outermost_name.trim() == trimmed_name {
                             // Matches outermost - close it
-                            let (_, content, attrs) = self.state.open_tags.remove(0);
-                            let already_emitted =
-                                self.state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
+                            let (stored_name, content, attrs) = self.state.open_tags.remove(0);
+                            let already_emitted = self
+                                .state
+                                .emitted_tag_lens
+                                .remove(&stored_name)
+                                .unwrap_or(0);
 
-                            if let Some(tag_handle) = self.tag_map.get(&tag_name) {
+                            if let Some(tag_handle) = tag_handle {
                                 // Emit any remaining content
                                 if content.len() > already_emitted {
                                     let remaining = &content[already_emitted..];
@@ -421,8 +400,10 @@ impl XmlParser {
                                         ));
                                     }
                                 }
-                                let full_xml = format!("<{}>{}</{}>", tag_name, content, tag_name);
-                                events.push(Event::end(tag_handle.clone(), full_xml, attrs));
+                                // End event contains full XML with original tag name (preserving whitespace)
+                                let full_xml =
+                                    format!("<{}>{}</{}>", stored_name, content, stored_name);
+                                events.push(Event::end(tag_handle, full_xml, attrs));
                             }
                         } else {
                             // Doesn't match outermost - treat as content (greedy)
@@ -447,14 +428,14 @@ impl XmlParser {
                         }
 
                         let attrs = self.parse_attributes(tag_content);
-                        if let Some(tag_handle) = self.tag_map.get(&tag_name) {
+                        if let Some(tag_handle) = tag_handle {
                             // Emit start + end for self-closing (no content event)
                             events.push(Event::start(
                                 tag_handle.clone(),
                                 format!("<{}>", tag_name),
                                 attrs.clone(),
                             ));
-                            events.push(Event::end(tag_handle.clone(), tag_content, attrs));
+                            events.push(Event::end(tag_handle, tag_content, attrs));
                         }
                     } else {
                         // Inside another tag - treat as content (greedy)
@@ -480,8 +461,8 @@ impl XmlParser {
                             .open_tags
                             .push((tag_name.clone(), String::new(), attrs.clone()));
 
-                        if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                            events.push(Event::start(tag_handle.clone(), tag_content, attrs));
+                        if let Some(tag_handle) = tag_handle {
+                            events.push(Event::start(tag_handle, tag_content, attrs));
                         }
                     } else {
                         // Inside another tag - treat as content (greedy)
@@ -512,13 +493,23 @@ impl XmlParser {
         let inner = &tag_content[1..tag_content.len() - 1];
 
         if let Some(name) = inner.strip_prefix('/') {
-            Some(name.split_whitespace().next()?.to_string())
+            // Preserve leading whitespace in tag name
+            let trimmed_end = name.trim_end();
+            if trimmed_end.is_empty() {
+                None
+            } else {
+                Some(trimmed_end.to_string())
+            }
         } else {
-            let name = inner.split_whitespace().next()?;
-            if let Some(stripped) = name.strip_suffix('/') {
+            // Preserve leading whitespace, trim only trailing (for attrs/self-closing)
+            let trimmed_end = inner.trim_end_matches('/').split_whitespace().next()?;
+            // But we want to preserve leading space, so find where it starts
+            let leading_ws = inner.len() - inner.trim_start().len();
+            let name_with_leading = &inner[..leading_ws + trimmed_end.len()];
+            if let Some(stripped) = name_with_leading.strip_suffix('/') {
                 Some(stripped.to_string())
             } else {
-                Some(name.to_string())
+                Some(name_with_leading.to_string())
             }
         }
     }
@@ -612,12 +603,25 @@ impl XmlParser {
     }
 
     /// Flush any remaining buffered content as events.
-    pub fn flush(&mut self) -> Vec<Event> {
+    pub(crate) fn flush(&mut self) -> Vec<Event> {
         self.flush_internal()
     }
 
     fn flush_internal(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+
+        // Handle partial tag at EOF (e.g., "hello <think" - the "<think" is stuck in tag_buffer)
+        if self.state.in_tag && !self.state.tag_buffer.is_empty() {
+            let partial = std::mem::take(&mut self.state.tag_buffer);
+            if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
+                // Inside a registered tag - append to its content
+                content.push_str(&partial);
+            } else {
+                // Top level - append to content buffer
+                self.state.content_buffer.push_str(&partial);
+            }
+            self.state.in_tag = false;
+        }
 
         // Emit any remaining plain content
         if self.state.content_buffer.len() > self.state.emitted_top_len {
@@ -690,6 +694,7 @@ pub struct EventIterator<I> {
     inner: I,
     buffer: Vec<Event>,
     flushed: bool,
+    pending_error: Option<crate::error::PipelineError>,
 }
 
 impl<I> EventIterator<I> {
@@ -700,6 +705,7 @@ impl<I> EventIterator<I> {
             inner: iter,
             buffer: Vec::new(),
             flushed: false,
+            pending_error: None,
         }
     }
 }
@@ -708,12 +714,22 @@ impl<I> Iterator for EventIterator<I>
 where
     I: Iterator<Item = crate::error::Result<String>>,
 {
-    type Item = Event;
+    type Item = crate::error::Result<Event>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Return buffered events first
         if !self.buffer.is_empty() {
-            return Some(self.buffer.remove(0));
+            return Some(Ok(self.buffer.remove(0)));
+        }
+
+        // If we have a pending error (after flushing), return it and stop
+        if let Some(e) = self.pending_error.take() {
+            return Some(Err(e));
+        }
+
+        // If already flushed (error occurred), stop
+        if self.flushed {
+            return None;
         }
 
         // Get more tokens and parse
@@ -723,23 +739,33 @@ where
                     let events = self.parser.parse_token(&token);
                     if !events.is_empty() {
                         self.buffer.extend(events);
-                        return Some(self.buffer.remove(0));
+                        return Some(Ok(self.buffer.remove(0)));
                     }
                 }
                 Err(e) => {
-                    // Emit error as event instead of silently breaking
-                    return Some(Event::error(e.to_string()));
+                    // Flush partial state before returning error
+                    let flush_events = self.parser.flush();
+                    self.buffer.extend(flush_events);
+                    self.flushed = true;
+                    self.pending_error = Some(e);
+
+                    // Return buffered content first, error comes after
+                    if !self.buffer.is_empty() {
+                        return Some(Ok(self.buffer.remove(0)));
+                    }
+                    // No buffered content, return error immediately
+                    return Some(Err(self.pending_error.take().unwrap()));
                 }
             }
         }
 
-        // Flush remaining events
+        // Flush remaining events (normal completion)
         if !self.flushed {
             self.flushed = true;
             let events = self.parser.flush();
             if !events.is_empty() {
                 self.buffer.extend(events);
-                return Some(self.buffer.remove(0));
+                return Some(Ok(self.buffer.remove(0)));
             }
         }
 
@@ -751,6 +777,22 @@ where
 mod tests {
     use super::*;
 
+    type Expected<'a> = (Option<&'a str>, TagParts, &'a str);
+
+    fn assert_events(events: &[Event], expected: &[Expected<'_>]) {
+        assert_eq!(events.len(), expected.len(), "events: {events:#?}");
+        for (i, (event, (tag, part, content))) in events.iter().zip(expected).enumerate() {
+            assert_eq!(event.tag(), *tag, "idx={i} event={event:#?}");
+            assert_eq!(event.part(), *part, "idx={i} event={event:#?}");
+            assert_eq!(event.get_content(), *content, "idx={i} event={event:#?}");
+        }
+    }
+
+    fn assert_attr(event: &Event, key: &str, expected: &str) {
+        let attrs = event.attributes().expect("expected attributes");
+        assert_eq!(attrs.get(key).map(String::as_str), Some(expected));
+    }
+
     #[test]
     fn test_plain_text_only_parsing() {
         let mut parser = XmlParserBuilder::new().register_tag("think").build();
@@ -758,9 +800,7 @@ mod tests {
         let text = "Regular content";
         let events = parser.parse(&text);
 
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].tag(), None);
-        assert_eq!(events[0].get_content(), text);
+        assert_events(&events, &[(None, TagParts::Content, "Regular content")]);
     }
 
     #[test]
@@ -780,9 +820,7 @@ mod tests {
         let text = "  ";
         let events = parser.parse(&text);
 
-        assert!(events.len() == 1);
-        assert!(events[0].tag() == None);
-        assert_eq!(events[0].get_content(), text);
+        assert_events(&events, &[(None, TagParts::Content, "  ")]);
     }
 
     #[test]
@@ -792,18 +830,14 @@ mod tests {
         let text = "<think>Hello world</think>";
         let events = parser.parse(&text);
 
-        let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Hello world"),
-            (Some("think"), TagParts::End, text),
-        ];
-
-        assert_eq!(events.len(), 3);
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(
+            &events,
+            &[
+                (Some("think"), TagParts::Start, "<think>"),
+                (Some("think"), TagParts::Content, "Hello world"),
+                (Some("think"), TagParts::End, text),
+            ],
+        );
     }
 
     #[test]
@@ -813,19 +847,15 @@ mod tests {
         let text = "<think>Hello world</think>Regular content";
         let events = parser.parse(&text);
 
-        let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Hello world"),
-            (Some("think"), TagParts::End, "<think>Hello world</think>"),
-            (None, TagParts::Content, "Regular content"),
-        ];
-
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(
+            &events,
+            &[
+                (Some("think"), TagParts::Start, "<think>"),
+                (Some("think"), TagParts::Content, "Hello world"),
+                (Some("think"), TagParts::End, "<think>Hello world</think>"),
+                (None, TagParts::Content, "Regular content"),
+            ],
+        );
     }
 
     #[test]
@@ -833,18 +863,15 @@ mod tests {
         let mut parser = XmlParserBuilder::new().register_tag("think").build();
         let text = "<think>你好世界</think>普通内容";
         let events = parser.parse(&text);
-        let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "你好世界"),
-            (Some("think"), TagParts::End, "<think>你好世界</think>"),
-            (None, TagParts::Content, "普通内容"),
-        ];
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(
+            &events,
+            &[
+                (Some("think"), TagParts::Start, "<think>"),
+                (Some("think"), TagParts::Content, "你好世界"),
+                (Some("think"), TagParts::End, "<think>你好世界</think>"),
+                (None, TagParts::Content, "普通内容"),
+            ],
+        );
     }
 
     #[test]
@@ -854,29 +881,24 @@ mod tests {
         let text = "How are <think>Hello world</think>you doing today?";
         let events = parser.parse(&text);
 
-        let expected = &[
-            (None, TagParts::Content, "How are "),
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Hello world"),
-            (Some("think"), TagParts::End, "<think>Hello world</think>"),
-            (None, TagParts::Content, "you doing today?"),
-        ];
+        assert_events(
+            &events,
+            &[
+                (None, TagParts::Content, "How are "),
+                (Some("think"), TagParts::Start, "<think>"),
+                (Some("think"), TagParts::Content, "Hello world"),
+                (Some("think"), TagParts::End, "<think>Hello world</think>"),
+                (None, TagParts::Content, "you doing today?"),
+            ],
+        );
 
-        let expected_content = "How are you doing today?";
-
-        let mut final_content = String::new();
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            match event.tag() {
-                None => final_content.push_str(event.get_content()),
-                Some(_) => {}
-            }
-
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
-
-        assert_eq!(final_content, expected_content);
+        // Verify plain content reconstruction
+        let plain: String = events
+            .iter()
+            .filter(|e| e.tag().is_none())
+            .map(|e| e.get_content())
+            .collect();
+        assert_eq!(plain, "How are you doing today?");
     }
 
     #[test]
@@ -906,12 +928,31 @@ mod tests {
             (Some("answer"), TagParts::End, "<answer>2</answer>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
+    }
+
+    #[test]
+    fn test_multiple_same_tag_parsing() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+
+        let text = "<think>Hello world</think><think>Regular content</think>";
+
+        let events = parser.parse(&text);
+
+        let expected = &[
+            (Some("think"), TagParts::Start, "<think>"),
+            (Some("think"), TagParts::Content, "Hello world"),
+            (Some("think"), TagParts::End, "<think>Hello world</think>"),
+            (Some("think"), TagParts::Start, "<think>"),
+            (Some("think"), TagParts::Content, "Regular content"),
+            (
+                Some("think"),
+                TagParts::End,
+                "<think>Regular content</think>",
+            ),
+        ];
+
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -927,12 +968,7 @@ mod tests {
             (None, TagParts::Content, "Regular content"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -953,12 +989,25 @@ mod tests {
             (Some("answer"), TagParts::End, "<answer>2</answer>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
+    }
+
+    #[test]
+    fn test_self_closing_tag_parsing() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+
+        let text = "<think/>Regular Content<think />";
+        let events = parser.parse(&text);
+
+        let expected = &[
+            (Some("think"), TagParts::Start, "<think>"),
+            (Some("think"), TagParts::End, "<think/>"),
+            (None, TagParts::Content, "Regular Content"),
+            (Some("think"), TagParts::Start, "<think>"),
+            (Some("think"), TagParts::End, "<think />"),
+        ];
+
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -980,12 +1029,7 @@ mod tests {
             (Some("answer"), TagParts::End, "<answer>2</answer>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1010,12 +1054,7 @@ mod tests {
             (None, TagParts::Content, "</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1039,12 +1078,7 @@ mod tests {
             ),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1063,12 +1097,7 @@ mod tests {
             ),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1087,90 +1116,58 @@ mod tests {
             ),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
-    fn test_self_closing_tag_parsing() {
+    fn test_tag_with_leading_whitespace() {
         let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
-        let text = "<think/>Regular Content<think />";
+        let text = "hello < think>content</ think>";
         let events = parser.parse(&text);
 
         let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::End, "<think/>"),
-            (None, TagParts::Content, "Regular Content"),
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::End, "<think />"),
+            (None, TagParts::Content, "hello "),
+            (Some(" think"), TagParts::Start, "< think>"),
+            (Some(" think"), TagParts::Content, "content"),
+            (Some(" think"), TagParts::End, "< think>content</ think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
-    fn test_multiple_same_tag_parsing() {
+    fn test_empty_tag_name() {
         let mut parser = XmlParserBuilder::new().register_tag("think").build();
 
-        let text = "<think>Hello world</think><think>Regular content</think>";
-
+        let text = "hello <> world </>";
         let events = parser.parse(&text);
 
-        let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Hello world"),
-            (Some("think"), TagParts::End, "<think>Hello world</think>"),
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Regular content"),
-            (
-                Some("think"),
-                TagParts::End,
-                "<think>Regular content</think>",
-            ),
-        ];
-
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, &[(None, TagParts::Content, "hello <> world </>")]);
     }
 
     #[test]
-    fn test_reset_isolation() {
+    fn test_reset_clears_streaming_state() {
         let mut parser = XmlParserBuilder::new()
             .register_tag("think")
             .register_tag("answer")
             .build();
 
-        let text = "Before <think>thinking here</think> middle <answer>42</answer> after";
+        parser.parse_token("<thi");
+        parser.parse_token("nk>partial content");
+        parser.parse_token(" more");
+        parser.reset();
 
-        let first_parse = parser.parse(&text);
-        let second_parse = parser.parse(&text);
+        let mut events = parser.parse_token("<answer>42</answer>");
+        events.extend(parser.flush());
 
-        assert_eq!(
-            first_parse.len(),
-            second_parse.len(),
-            "parse() should return same number of events on repeated calls"
-        );
+        let expected = &[
+            (Some("answer"), TagParts::Start, "<answer>"),
+            (Some("answer"), TagParts::Content, "42"),
+            (Some("answer"), TagParts::End, "<answer>42</answer>"),
+        ];
 
-        for (first, second) in first_parse.iter().zip(second_parse.iter()) {
-            assert_eq!(first.tag(), second.tag());
-            assert_eq!(first.part(), second.part());
-            assert_eq!(first.get_content(), second.get_content());
-            assert_eq!(first.attributes(), second.attributes());
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1186,108 +1183,45 @@ mod tests {
     }
 
     #[test]
-    fn test_attribute_no_quotes() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
+    fn test_attribute_parsing_variants() {
+        let cases = [
+            // (input, attr_key, expected_value)
+            ("<fn name=get_weather>x</fn>", "name", "get_weather"), // no quotes
+            ("<fn name=\"get_weather\">x</fn>", "name", "get_weather"), // double quotes
+            ("<fn name='get_weather'>x</fn>", "name", "get_weather"), // single quotes
+            ("<fn name = get_weather>x</fn>", "name", "get_weather"), // spaces around =
+            ("<fn name=\"get weather\">x</fn>", "name", "get weather"), // space in value
+            ("<fn name=\"unterminated>x</fn>", "name", "unterminated"), // unterminated quote
+        ];
 
-        let text = "<function_call name=get_weather>Tokyo</function_call>";
-
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
+        for (input, key, expected) in cases {
+            let mut parser = XmlParserBuilder::new().register_tag("fn").build();
+            let events = parser.parse(input);
+            assert_attr(&events[0], key, expected);
+        }
     }
 
     #[test]
-    fn test_attributes_self_closing_tag_parsing() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
-
-        let text = "<function_call name=get_weather/>";
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
+    fn test_attribute_boolean() {
+        let mut parser = XmlParserBuilder::new().register_tag("fn").build();
+        let events = parser.parse("<fn disabled>x</fn>");
+        assert!(events[0].attributes().unwrap().contains_key("disabled"));
     }
 
     #[test]
-    fn test_attribute_double_quotes() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
-
-        let text = "<function_call name=\"get_weather\">Tokyo</function_call>";
-
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
-    }
-
-    #[test]
-    fn test_attribute_single_quotes() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
-
-        let text = "<function_call name='get_weather'>Tokyo</function_call>";
-
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
-    }
-
-    #[test]
-    fn test_attribute_quotes_with_spaces() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
-
-        let text = "<function_call name=\"get weather\">Tokyo</function_call>";
-
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get weather".to_string())
-        );
+    fn test_attributes_self_closing() {
+        let mut parser = XmlParserBuilder::new().register_tag("fn").build();
+        let events = parser.parse("<fn name=test/>");
+        assert_attr(&events[0], "name", "test");
     }
 
     #[test]
     fn test_multiple_attributes() {
-        let mut parser = XmlParserBuilder::new()
-            .register_tag("function_call")
-            .build();
+        let mut parser = XmlParserBuilder::new().register_tag("fn").build();
+        let events = parser.parse("<fn name='get_weather' id=0>x</fn>");
 
-        let text = "<function_call name='get_weather' id=0>Tokyo</function_call>";
-
-        let events = parser.parse(&text);
-
-        assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
-        assert_eq!(
-            events[0].attributes().unwrap().get("id"),
-            Some(&"0".to_string())
-        );
+        assert_attr(&events[0], "name", "get_weather");
+        assert_attr(&events[0], "id", "0");
     }
 
     #[test]
@@ -1299,13 +1233,9 @@ mod tests {
         let text = "<function_call name=test>content</function_call>";
         let events = parser.parse(&text);
 
-        // All three events should have the same attributes
         for event in &events {
             if event.tag() == Some("function_call") {
-                assert_eq!(
-                    event.attributes().unwrap().get("name"),
-                    Some(&"test".to_string())
-                );
+                assert_attr(event, "name", "test");
             }
         }
     }
@@ -1334,13 +1264,13 @@ mod tests {
             Ok("me=get_weather>Tokyo</function_call>".to_string()),
         ];
 
-        let events: Vec<Event> = parser.parse_iter(tokens.into_iter()).collect();
+        let events: Vec<Event> = parser
+            .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
+            .collect();
 
         assert_eq!(events[0].tag(), Some("function_call"));
-        assert_eq!(
-            events[0].attributes().unwrap().get("name"),
-            Some(&"get_weather".to_string())
-        );
+        assert_attr(&events[0], "name", "get_weather");
     }
 
     #[test]
@@ -1355,6 +1285,7 @@ mod tests {
 
         let events = parser
             .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
             .collect::<Vec<Event>>();
 
         let expected = &[
@@ -1373,12 +1304,7 @@ mod tests {
             (None, TagParts::Content, "</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1393,6 +1319,7 @@ mod tests {
 
         let events = parser
             .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
             .collect::<Vec<Event>>();
 
         let expected = &[
@@ -1410,12 +1337,7 @@ mod tests {
             ),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1429,6 +1351,7 @@ mod tests {
 
         let events = parser
             .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
             .collect::<Vec<Event>>();
 
         let expected = &[
@@ -1437,12 +1360,7 @@ mod tests {
             (Some("think"), TagParts::End, "<think>Hello world</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1457,6 +1375,7 @@ mod tests {
 
         let events = parser
             .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
             .collect::<Vec<Event>>();
 
         let expected = &[
@@ -1465,40 +1384,7 @@ mod tests {
             (Some("think"), TagParts::End, "<think>Hello world</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
-    }
-
-    #[test]
-    fn test_iter_multiple_splits_tag_parsing() {
-        let parser = XmlParserBuilder::new().register_tag("think").build();
-
-        let tokens = vec![
-            Ok("<".to_string()),
-            Ok("think".to_string()),
-            Ok(">Hello world</think>".to_string()),
-        ];
-
-        let events = parser
-            .parse_iter(tokens.into_iter())
-            .collect::<Vec<Event>>();
-
-        let expected = &[
-            (Some("think"), TagParts::Start, "<think>"),
-            (Some("think"), TagParts::Content, "Hello world"),
-            (Some("think"), TagParts::End, "<think>Hello world</think>"),
-        ];
-
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1512,6 +1398,7 @@ mod tests {
         ];
         let events = parser
             .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
             .collect::<Vec<Event>>();
 
         let expected = &[
@@ -1521,12 +1408,7 @@ mod tests {
             (Some("think"), TagParts::End, "<think>Hello world</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
     }
 
     #[test]
@@ -1535,7 +1417,10 @@ mod tests {
 
         let input = "<think>Hello world</think>";
         let tokens: Vec<Result<String, _>> = input.chars().map(|c| Ok(c.to_string())).collect();
-        let events: Vec<Event> = parser.parse_iter(tokens.into_iter()).collect();
+        let events: Vec<Event> = parser
+            .parse_iter(tokens.into_iter())
+            .map(|r| r.unwrap())
+            .collect();
 
         let expected = &[
             (Some("think"), TagParts::Start, "<think>"),
@@ -1553,11 +1438,94 @@ mod tests {
             (Some("think"), TagParts::End, "<think>Hello world</think>"),
         ];
 
-        assert_eq!(events.len(), expected.len());
-        for (event, (tag, part, content)) in events.iter().zip(expected) {
-            assert_eq!(event.tag(), *tag);
-            assert_eq!(event.part(), *part);
-            assert_eq!(event.get_content(), *content);
-        }
+        assert_events(&events, expected);
+    }
+
+    #[test]
+    fn test_partial_tag_at_end_emitted() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+
+        let text = "hello <think";
+        let events = parser.parse(&text);
+
+        assert_events(&events, &[(None, TagParts::Content, "hello <think")]);
+    }
+
+    #[test]
+    fn test_partial_tag_inside_registered_tag() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+        let events = parser.parse("<think>hi <ans");
+
+        let expected = &[
+            (Some("think"), TagParts::Start, "<think>"),
+            (Some("think"), TagParts::Content, "hi <ans"),
+        ];
+
+        assert_events(&events, expected);
+    }
+
+    #[test]
+    fn test_parse_token_no_double_emit() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+
+        let events1 = parser.parse_token("hello ");
+        let events2 = parser.parse_token("world");
+        let events3 = parser.flush();
+
+        let all_content: String = events1
+            .iter()
+            .chain(events2.iter())
+            .chain(events3.iter())
+            .map(|e| e.get_content())
+            .collect();
+
+        assert_eq!(all_content, "hello world");
+    }
+
+    #[test]
+    fn test_parse_token_flush_trailing_plain() {
+        let mut parser = XmlParserBuilder::new().register_tag("think").build();
+
+        let _ = parser.parse_token("<think>content</think>");
+        let events1 = parser.parse_token("trailing");
+        let events2 = parser.flush();
+
+        let trailing_count = events1
+            .iter()
+            .chain(events2.iter())
+            .filter(|e| e.tag().is_none() && e.get_content().contains("trailing"))
+            .count();
+
+        assert_eq!(trailing_count, 1);
+    }
+
+    #[test]
+    fn test_parse_tool_call_valid() {
+        let mut parser = XmlParserBuilder::new().register_tag("tool_call").build();
+
+        let text =
+            r#"<tool_call>{"name": "get_weather", "arguments": {"city": "Tokyo"}}</tool_call>"#;
+        let events = parser.parse(&text);
+
+        let end_event = events.iter().find(|e| e.part() == TagParts::End).unwrap();
+        let result = end_event.parse_tool_call();
+
+        assert!(result.is_some());
+        let (name, args) = result.unwrap();
+        assert_eq!(name, "get_weather");
+        assert_eq!(args["city"], "Tokyo");
+    }
+
+    #[test]
+    fn test_parse_tool_call_invalid() {
+        let mut parser = XmlParserBuilder::new().register_tag("tool_call").build();
+
+        let text = "<tool_call>not valid json</tool_call>";
+        let events = parser.parse(&text);
+
+        let end_event = events.iter().find(|e| e.part() == TagParts::End).unwrap();
+        let result = end_event.parse_tool_call();
+
+        assert!(result.is_none());
     }
 }

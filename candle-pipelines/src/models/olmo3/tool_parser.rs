@@ -65,7 +65,9 @@ impl Olmo3Parser {
     /// Process an XmlParser event and convert to ParseEvents.
     fn process_xml_event(&mut self, event: Event) {
         match &event {
-            Event::Tagged { tag, part, content, .. } if tag == "function_calls" => {
+            Event::Tagged {
+                tag, part, content, ..
+            } if tag == "function_calls" => {
                 match part {
                     TagParts::Start => {
                         // Function calls block starting - continue buffering
@@ -92,16 +94,10 @@ impl Olmo3Parser {
                     }
                 }
             }
-            Event::Output { part, content } => {
-                // Regular output - emit as text
-                if let TagParts::Content = part {
-                    if !content.is_empty() {
-                        self.pending_events.push_back(ParseEvent::text(content));
-                    }
+            Event::Output { content } => {
+                if !content.is_empty() {
+                    self.pending_events.push_back(ParseEvent::text(content));
                 }
-            }
-            Event::Error { message } => {
-                self.pending_events.push_back(ParseEvent::error(message));
             }
         }
     }
