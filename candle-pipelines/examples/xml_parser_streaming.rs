@@ -44,31 +44,37 @@ fn main() -> Result<()> {
     println!("\n--- Events ---");
 
     for event in events {
-        let event = event?; // Propagate errors
-        match event.tag() {
-            Some("think") => match event.part() {
-                TagParts::Start => println!("[THINKING]"),
-                TagParts::Content => print!("{}", event.get_content()),
-                TagParts::End => println!("[DONE THINKING]\n"),
-            },
-            Some("tool_result") => match event.part() {
-                TagParts::Start => println!("[START TOOL RESULT]"),
-                TagParts::Content => print!("{}", event.get_content()),
-                TagParts::End => println!("[END TOOL RESULT]\n"),
-            },
-            Some("tool_call") => match event.part() {
-                TagParts::Start => println!("[TOOL CALL]"),
-                TagParts::Content => print!("{}", event.get_content()),
-                TagParts::End => println!("[END TOOL CALL]\n"),
-            },
-            Some(_) => { /* ignore unknown tags */ }
-            None => match event.part() {
-                TagParts::Start => println!("[OUTPUT]"),
-                TagParts::Content => print!("{}", event.get_content()),
-                TagParts::End => println!("[END OUTPUT]\n"),
-            },
+        match event {
+            Ok(event) => {
+                match event.tag() {
+                    Some("think") => match event.part() {
+                        TagParts::Start => println!("[THINKING]"),
+                        TagParts::Content => print!("{}", event.get_content()),
+                        TagParts::End => println!("[DONE THINKING]\n"),
+                    },
+                    Some("tool_result") => match event.part() {
+                        TagParts::Start => println!("[START TOOL RESULT]"),
+                        TagParts::Content => print!("{}", event.get_content()),
+                        TagParts::End => println!("[END TOOL RESULT]\n"),
+                    },
+                    Some("tool_call") => match event.part() {
+                        TagParts::Start => println!("[TOOL CALL]"),
+                        TagParts::Content => print!("{}", event.get_content()),
+                        TagParts::End => println!("[END TOOL CALL]\n"),
+                    },
+                    Some(_) => { /* ignore unknown tags */ }
+                    None => match event.part() {
+                        TagParts::Start => println!("[OUTPUT]"),
+                        TagParts::Content => print!("{}", event.get_content()),
+                        TagParts::End => println!("[END OUTPUT]\n"),
+                    },
+                }
+                std::io::stdout().flush().unwrap();
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+            }
         }
-        std::io::stdout().flush().unwrap();
     }
 
     Ok(())

@@ -1,11 +1,20 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, VecDeque};
 
+/// A tag name recognized by the parser.
+///
+/// Tag names may include leading whitespace from the source text (for example,
+/// `< think>` yields a tag name of `" think"`). The parser matches tags using
+/// `trim()` internally, but the stored name preserves the original formatting.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tag {
     name: String,
 }
 
 impl Tag {
+    /// Returns the tag name as stored by the parser.
+    ///
+    /// The returned name may include leading whitespace from the source text.
+    /// Do not assume the name is normalized.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -35,34 +44,57 @@ impl PartialEq<&Tag> for Tag {
     }
 }
 
-/// Which part of a tag is being emitted during streaming.
+/// Identifies which portion of a tag an [`Event`] represents.
+///
+/// For [`Event::Output`], [`Event::part`] returns [`TagParts::Content`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagParts {
-    /// Opening tag (e.g., `<tool_call>`).
+    /// An opening tag (for example, `<tool_call>`).
     Start,
-    /// Content between the opening and closing tags.
+    /// Text content inside a tracked tag, or plain output outside any tracked tag.
     Content,
-    /// Closing tag (e.g., `</tool_call>`).
+    /// A closing tag (for example, `</tool_call>`).
     End,
 }
 
-/// An event emitted during XML stream parsing.
+/// An event emitted by [`XmlParser`].
+///
+/// This parser recognizes a small XML-like syntax for a configured set of tag names.
+/// It emits:
+/// - [`Event::Tagged`] for tracked tags, with [`TagParts::Start`], [`TagParts::Content`],
+///   and [`TagParts::End`].
+/// - [`Event::Output`] for text outside any tracked tag.
+///
+/// For [`Event::Tagged`]:
+/// - `Start` events store the opening tag text in `content`.
+/// - `Content` events store text inside the tag in `content`.
+/// - `End` events store a reconstructed full element string in `content`
+///   (see [`XmlParser`] docs for details and limitations).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// Content within a registered XML tag.
+    /// Data associated with a tracked tag.
     Tagged {
-        /// The tag being parsed.
+        /// The parsed tag name as produced by the parser.
+        ///
+        /// Note: the parser may preserve leading whitespace from the source text
+        /// (for example, `< think>` yields a tag name of `" think"`).
         tag: Tag,
-        /// Which part of the tag (start, content, end).
+        /// Which portion of the tag this event represents.
         part: TagParts,
-        /// The content/text.
+        /// The payload for this event.
+        ///
+        /// - For `Start`, this is the opening tag text.
+        /// - For `Content`, this is tag inner text (possibly chunked in streaming mode).
+        /// - For `End`, this is the reconstructed full element string.
         content: String,
-        /// Attributes from the opening tag.
+        /// Parsed attributes from the opening tag.
+        ///
+        /// The parser attaches the same attribute map to all events for the element.
         attributes: HashMap<String, String>,
     },
-    /// Content outside any registered tags (plain output).
+    /// Text outside any tracked tag.
     Output {
-        /// The content/text.
+        /// The emitted text (possibly chunked in streaming mode).
         content: String,
     },
 }
@@ -116,14 +148,23 @@ impl Event {
         Self::tagged(tag, TagParts::Content, content, attributes)
     }
 
-    /// Get the content/text of this event.
+    /// Returns the payload string for this event.
+    ///
+    /// For [`Event::Tagged`], the returned string depends on [`Event::part`]:
+    /// - `Start`: opening tag text
+    /// - `Content`: inner text
+    /// - `End`: reconstructed full element text
     pub fn get_content(&self) -> &str {
         match self {
             Self::Tagged { content, .. } | Self::Output { content, .. } => content,
         }
     }
 
-    /// Get the tag name if this is a tagged event.
+    /// Returns the tag name for [`Event::Tagged`], or `None` for [`Event::Output`].
+    ///
+    /// The returned name is the parser's stored name for this element and may include
+    /// leading whitespace from the source text (for example, `< think>` yields `" think"`).
+    /// Do not assume the name is normalized.
     pub fn tag(&self) -> Option<&str> {
         match self {
             Self::Tagged { tag, .. } => Some(tag.name()),
@@ -140,8 +181,12 @@ impl Event {
         }
     }
 
-    /// Get attributes if this is a tagged event with attributes.
-    /// Returns None for Output events, or tagged events with no attributes.
+    /// Returns parsed attributes for this event.
+    ///
+    /// Returns `Some(...)` only when this is [`Event::Tagged`] and the attribute map is non-empty.
+    /// Returns `None` for [`Event::Output`] and for tagged events whose opening tag had no attributes.
+    ///
+    /// Boolean attributes (for example, `<fn disabled>`) appear with an empty string value.
     pub fn attributes(&self) -> Option<&HashMap<String, String>> {
         match self {
             Self::Tagged { attributes, .. } if !attributes.is_empty() => Some(attributes),
@@ -149,8 +194,19 @@ impl Event {
         }
     }
 
-    /// Parse this event as a tool call if it's a complete `<tool_call>` end event.
-    /// Returns `(name, arguments)` if successful.
+    /// Parses this event as a `<tool_call>` payload.
+    ///
+    /// This returns `Some((name, arguments))` only when:
+    /// - `self` is a tagged event whose `tag()` is exactly `"tool_call"`,
+    /// - `part()` is [`TagParts::End`], and
+    /// - `get_content()` starts with `<tool_call>` and ends with `</tool_call>`.
+    ///
+    /// The parser trims whitespace inside the element, parses the inner text as JSON,
+    /// and expects an object with:
+    /// - `"name"`: a string
+    /// - `"arguments"`: any JSON value
+    ///
+    /// Returns `None` on any mismatch or JSON parsing/shape error.
     pub fn parse_tool_call(&self) -> Option<(String, serde_json::Value)> {
         let tag = self.tag()?;
         if tag != "tool_call" || self.part() != TagParts::End {
@@ -172,7 +228,10 @@ impl Event {
     }
 }
 
-/// Builder for creating an [`XmlParser`] with specific tags to track.
+/// Builder for creating an [`XmlParser`] with a set of tag names to track.
+///
+/// The parser matches input tag names using `trim()` on the parsed name.
+/// Register normalized tag names (for example, `"think"`, not `" think"`).
 ///
 /// # Example
 ///
@@ -193,8 +252,12 @@ impl XmlParserBuilder {
         Self::default()
     }
 
-    /// Register a tag name for the parser to track. Returns self for chaining.
-    /// Registering the same tag twice is idempotent.
+    /// Registers a tag name for the parser to track and returns `self` for chaining.
+    ///
+    /// Registering the same name multiple times is idempotent.
+    ///
+    /// This method does not normalize the provided name. Register normalized names
+    /// (for example, `"think"`).
     pub fn register_tag(mut self, tag: impl Into<String>) -> Self {
         let name = tag.into();
         if !self.tags.contains(&name) {
@@ -206,60 +269,80 @@ impl XmlParserBuilder {
     /// Build the parser with all registered tags.
     pub fn build(self) -> XmlParser {
         let mut tag_map = HashMap::new();
-        let mut tags_set = HashSet::new();
 
         for name in self.tags {
-            tags_set.insert(name.clone());
             tag_map.insert(name.clone(), Tag { name });
         }
 
-        XmlParser::new(tags_set, tag_map)
+        XmlParser::new(tag_map)
     }
 }
 
 #[derive(Debug, Clone)]
+struct OpenTag {
+    name: String,
+    content: String,
+    attrs: HashMap<String, String>,
+    emitted_len: usize,
+}
+
+#[derive(Debug, Clone, Default)]
 struct ParserState {
-    /// (tag_name, content, attributes)
-    open_tags: Vec<(String, String, HashMap<String, String>)>,
+    open_tag: Option<OpenTag>,
     content_buffer: String,
     tag_buffer: String,
     in_tag: bool,
     emitted_top_len: usize,
-    emitted_tag_lens: std::collections::HashMap<String, usize>,
 }
 
-impl Default for ParserState {
-    fn default() -> Self {
-        Self {
-            open_tags: Vec::with_capacity(4),
-            content_buffer: String::with_capacity(1024),
-            tag_buffer: String::with_capacity(64),
-            in_tag: false,
-            emitted_top_len: 0,
-            emitted_tag_lens: HashMap::with_capacity(4),
-        }
-    }
-}
-
-/// Streaming XML parser for extracting structured content from LLM output.
+/// Streaming parser for extracting XML-like tagged regions from text.
 ///
-/// Parses text containing XML-like tags and emits events for tag boundaries
-/// and content. Useful for structured output like `<think>...</think>` blocks.
+/// The parser recognizes a small tag syntax and emits [`Event`] values for:
+/// - text outside tracked tags ([`Event::Output`])
+/// - the opening tag, inner text, and closing tag of tracked tags ([`Event::Tagged`]).
 ///
-/// **Note:** This parser is `!Sync`. If you need to share it across threads,
-/// wrap it in a `Mutex` or `RwLock`.
+/// # Tag tracking and limitations
+///
+/// - The parser tracks at most one open tracked tag at a time. It does not support
+///   nested tracked tags.
+/// - If a tracked tag appears inside the content of another tracked tag, the parser
+///   treats it as literal text until the outer tag closes.
+/// - The parser does not validate XML and does not handle namespaces, entities,
+///   comments, CDATA, or processing instructions. Malformed or mismatched tags are
+///   emitted as plain text.
+///
+/// # Event payloads
+///
+/// For a tracked element `<name ...attrs...>inner</name>`:
+/// - A `Start` event is emitted with `get_content()` set to the opening tag text
+///   as it appeared in the input.
+/// - Zero or more `Content` events are emitted with slices of `inner`
+///   (streaming mode may chunk this arbitrarily).
+/// - An `End` event is emitted with `get_content()` set to a reconstructed string
+///   of the form `<name>{inner}</name>`. This reconstruction does not preserve
+///   original attribute text or whitespace in the opening/closing tags.
+///
+/// For a self-closing tracked tag (for example, `<name a=b/>`), the parser emits:
+/// - `Start` with `get_content()` set to `"<name>"` (normalized; attributes not included),
+/// - `End` with `get_content()` set to the original self-closing tag text.
+///
+/// # Threading
+///
+/// This type is `Sync`, but parsing mutates internal state and requires `&mut self`.
+/// If you need shared mutable access across threads, wrap it in a `Mutex` or `RwLock`.
 #[derive(Debug, Clone)]
 pub struct XmlParser {
-    registered_tags: HashSet<String>,
     tag_map: HashMap<String, Tag>,
     state: ParserState,
 }
 
 impl XmlParser {
-    /// Create a new parser for the specified tags.
-    pub fn new(tags: HashSet<String>, tag_map: HashMap<String, Tag>) -> Self {
+    /// Creates a parser that tracks the provided tag names.
+    ///
+    /// The parser matches an input tag by comparing `trim()` of the parsed tag name
+    /// against the keys of `tag_map`.
+    pub fn new(tag_map: HashMap<String, Tag>) -> Self {
         Self {
-            registered_tags: tags,
             tag_map,
             state: ParserState::default(),
         }
@@ -270,69 +353,65 @@ impl XmlParser {
         self.state = ParserState::default();
     }
 
-    /// Parse a complete text string and return all events.
+    /// Parses `text` as a complete input and returns all produced events.
+    ///
+    /// This method calls [`XmlParser::reset`] before parsing and flushes any buffered
+    /// data at the end. In non-streaming mode, inner content for a tracked tag is
+    /// typically emitted as a single `Content` event when the closing tag arrives.
     pub fn parse(&mut self, text: &str) -> Vec<Event> {
         self.reset();
         let mut events = Vec::new();
 
         for c in text.chars() {
-            events.extend(self.process_char_internal(c));
+            self.process_char_internal(c, &mut events);
         }
 
-        events.extend(self.flush_internal());
+        self.flush_internal(&mut events);
         events
     }
 
-    /// Parse a single token in streaming mode. Call `flush()` when done.
+    /// Parses a chunk of input in streaming mode and returns newly available events.
+    ///
+    /// This may emit `Content` events incrementally as additional characters arrive.
+    /// Call [`XmlParser::flush`] after the final chunk to emit any remaining buffered text.
     pub(crate) fn parse_token(&mut self, token: &str) -> Vec<Event> {
         let mut events = Vec::new();
 
         for c in token.chars() {
-            events.extend(self.process_char_internal(c));
+            self.process_char_internal(c, &mut events);
         }
 
-        // Emit plain content as it comes in
-        if self.state.open_tags.is_empty() {
+        if let Some(ref mut open) = self.state.open_tag {
+            let total_len = open.content.len();
+            if total_len > open.emitted_len {
+                let new_slice = &open.content[open.emitted_len..];
+                if !new_slice.is_empty() {
+                    if let Some(tag_handle) = self.tag_map.get(&open.name) {
+                        events.push(Event::tagged_internal(
+                            tag_handle.clone(),
+                            new_slice,
+                            open.attrs.clone(),
+                        ));
+                    }
+                }
+                open.emitted_len = total_len;
+            }
+        } else {
             let current_len = self.state.content_buffer.len();
             if current_len > self.state.emitted_top_len {
                 let new_slice = &self.state.content_buffer[self.state.emitted_top_len..];
                 if !new_slice.is_empty() {
                     events.push(Event::content(new_slice));
                 }
-                self.state.emitted_top_len = current_len;
-            }
-        } else if let Some((tag_name_ref, content_ref, attrs_ref)) = self.state.open_tags.last() {
-            // Emit tagged content as it comes in
-            let tag_name = tag_name_ref.clone();
-            let content = content_ref.clone();
-            let attrs = attrs_ref.clone();
-            let total_len = content.len();
-
-            let already_emitted = *self.state.emitted_tag_lens.get(&tag_name).unwrap_or(&0);
-
-            if total_len > already_emitted {
-                let new_slice = &content[already_emitted..];
-                if !new_slice.is_empty() {
-                    if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                        events.push(Event::tagged_internal(
-                            tag_handle.clone(),
-                            new_slice,
-                            attrs.clone(),
-                        ));
-                    }
-                }
-                self.state
-                    .emitted_tag_lens
-                    .insert(tag_name.clone(), total_len);
+                self.state.content_buffer.clear();
+                self.state.emitted_top_len = 0;
             }
         }
 
         events
     }
 
-    fn process_char_internal(&mut self, c: char) -> Vec<Event> {
-        let mut events = Vec::new();
-
+    fn process_char_internal(&mut self, c: char, out: &mut Vec<Event>) {
         match c {
             '<' => {
                 self.state.in_tag = true;
@@ -343,146 +422,115 @@ impl XmlParser {
                 self.state.tag_buffer.push(c);
                 self.state.in_tag = false;
 
-                let tag_content = self.state.tag_buffer.clone();
-                self.state.tag_buffer.clear();
-
-                events.extend(self.handle_tag(&tag_content));
+                let tag_content = std::mem::take(&mut self.state.tag_buffer);
+                self.handle_tag(&tag_content, out);
             }
             _ if self.state.in_tag => {
                 self.state.tag_buffer.push(c);
             }
             _ => {
-                if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                    content.push(c);
+                if let Some(ref mut open) = self.state.open_tag {
+                    open.content.push(c);
                 } else {
                     self.state.content_buffer.push(c);
                 }
             }
         }
-
-        events
     }
 
-    fn handle_tag(&mut self, tag_content: &str) -> Vec<Event> {
-        let mut events = Vec::new();
-
+    fn handle_tag(&mut self, tag_content: &str, out: &mut Vec<Event>) {
         if let Some(tag_name) = self.parse_tag_name(tag_content) {
-            // Use trimmed name for registration lookup (whitespace-insensitive matching)
             let trimmed_name = tag_name.trim().to_string();
-            if self.registered_tags.contains(&trimmed_name) {
-                // Create tag handle with original name (preserving whitespace)
-                let tag_handle = self.tag_map.get(&trimmed_name).map(|_| Tag {
+            if self.tag_map.contains_key(&trimmed_name) {
+                let tag_handle = Tag {
                     name: tag_name.clone(),
-                });
+                };
 
                 if tag_content.starts_with("</") {
-                    // Closing tag - only close if it matches the outermost open tag
-                    if let Some((outermost_name, _, _)) = self.state.open_tags.first() {
-                        // Compare trimmed names for matching
-                        if outermost_name.trim() == trimmed_name {
-                            // Matches outermost - close it
-                            let (stored_name, content, attrs) = self.state.open_tags.remove(0);
-                            let already_emitted = self
-                                .state
-                                .emitted_tag_lens
-                                .remove(&stored_name)
-                                .unwrap_or(0);
+                    if let Some(ref open) = self.state.open_tag {
+                        if open.name.trim() == trimmed_name {
+                            let open = self.state.open_tag.take().unwrap();
 
-                            if let Some(tag_handle) = tag_handle {
-                                // Emit any remaining content
-                                if content.len() > already_emitted {
-                                    let remaining = &content[already_emitted..];
-                                    if !remaining.is_empty() {
-                                        events.push(Event::tagged_internal(
-                                            tag_handle.clone(),
-                                            remaining,
-                                            attrs.clone(),
-                                        ));
-                                    }
+                            if open.content.len() > open.emitted_len {
+                                let remaining = &open.content[open.emitted_len..];
+                                if !remaining.is_empty() {
+                                    out.push(Event::tagged_internal(
+                                        tag_handle.clone(),
+                                        remaining,
+                                        open.attrs.clone(),
+                                    ));
                                 }
-                                // End event contains full XML with original tag name (preserving whitespace)
-                                let full_xml =
-                                    format!("<{}>{}</{}>", stored_name, content, stored_name);
-                                events.push(Event::end(tag_handle, full_xml, attrs));
                             }
+
+                            let full_xml =
+                                format!("<{}>{}</{}>", open.name, open.content, open.name);
+                            out.push(Event::end(tag_handle, full_xml, open.attrs));
                         } else {
-                            // Doesn't match outermost - treat as content (greedy)
-                            if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                                content.push_str(tag_content);
+                            if let Some(ref mut open) = self.state.open_tag {
+                                open.content.push_str(tag_content);
                             }
                         }
                     } else {
-                        // No open tags - closing tag becomes plain content
                         self.state.content_buffer.push_str(tag_content);
                     }
                 } else if tag_content.ends_with("/>") {
-                    // Self-closing tag
-                    if self.state.open_tags.is_empty() {
-                        // Emit any buffered plain content first
+                    if self.state.open_tag.is_none() {
                         if !self.state.content_buffer.is_empty() {
                             let content = &self.state.content_buffer[self.state.emitted_top_len..];
                             if !content.is_empty() {
-                                events.push(Event::content(content));
+                                out.push(Event::content(content));
                             }
                             self.state.emitted_top_len = self.state.content_buffer.len();
                         }
 
                         let attrs = self.parse_attributes(tag_content);
-                        if let Some(tag_handle) = tag_handle {
-                            // Emit start + end for self-closing (no content event)
-                            events.push(Event::start(
-                                tag_handle.clone(),
-                                format!("<{}>", tag_name),
-                                attrs.clone(),
-                            ));
-                            events.push(Event::end(tag_handle, tag_content, attrs));
-                        }
+
+                        out.push(Event::start(
+                            tag_handle.clone(),
+                            format!("<{}>", tag_name),
+                            attrs.clone(),
+                        ));
+                        out.push(Event::end(tag_handle, tag_content, attrs));
                     } else {
-                        // Inside another tag - treat as content (greedy)
-                        if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                            content.push_str(tag_content);
+                        if let Some(ref mut open) = self.state.open_tag {
+                            open.content.push_str(tag_content);
                         }
                     }
                 } else {
-                    // Opening tag
-                    if self.state.open_tags.is_empty() {
-                        // Only open new tags at top level (greedy parsing)
-                        // Emit any buffered plain content first
+                    if self.state.open_tag.is_none() {
                         if !self.state.content_buffer.is_empty() {
                             let content = &self.state.content_buffer[self.state.emitted_top_len..];
                             if !content.is_empty() {
-                                events.push(Event::content(content));
+                                out.push(Event::content(content));
                             }
                             self.state.emitted_top_len = self.state.content_buffer.len();
                         }
 
                         let attrs = self.parse_attributes(tag_content);
-                        self.state
-                            .open_tags
-                            .push((tag_name.clone(), String::new(), attrs.clone()));
+                        self.state.open_tag = Some(OpenTag {
+                            name: tag_name.clone(),
+                            content: String::new(),
+                            attrs: attrs.clone(),
+                            emitted_len: 0,
+                        });
 
-                        if let Some(tag_handle) = tag_handle {
-                            events.push(Event::start(tag_handle, tag_content, attrs));
-                        }
+                        out.push(Event::start(tag_handle, tag_content, attrs));
                     } else {
-                        // Inside another tag - treat as content (greedy)
-                        if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                            content.push_str(tag_content);
+                        if let Some(ref mut open) = self.state.open_tag {
+                            open.content.push_str(tag_content);
                         }
                     }
                 }
-            } else if self.state.open_tags.is_empty() {
+            } else if let Some(ref mut open) = self.state.open_tag {
+                open.content.push_str(tag_content);
+            } else {
                 self.state.content_buffer.push_str(tag_content);
-            } else if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                content.push_str(tag_content);
             }
-        } else if self.state.open_tags.is_empty() {
+        } else if let Some(ref mut open) = self.state.open_tag {
+            open.content.push_str(tag_content);
+        } else {
             self.state.content_buffer.push_str(tag_content);
-        } else if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-            content.push_str(tag_content);
         }
-
-        events
     }
 
     fn parse_tag_name(&self, tag_content: &str) -> Option<String> {
@@ -493,7 +541,6 @@ impl XmlParser {
         let inner = &tag_content[1..tag_content.len() - 1];
 
         if let Some(name) = inner.strip_prefix('/') {
-            // Preserve leading whitespace in tag name
             let trimmed_end = name.trim_end();
             if trimmed_end.is_empty() {
                 None
@@ -501,9 +548,7 @@ impl XmlParser {
                 Some(trimmed_end.to_string())
             }
         } else {
-            // Preserve leading whitespace, trim only trailing (for attrs/self-closing)
             let trimmed_end = inner.trim_end_matches('/').split_whitespace().next()?;
-            // But we want to preserve leading space, so find where it starts
             let leading_ws = inner.len() - inner.trim_start().len();
             let name_with_leading = &inner[..leading_ws + trimmed_end.len()];
             if let Some(stripped) = name_with_leading.strip_suffix('/') {
@@ -514,17 +559,24 @@ impl XmlParser {
         }
     }
 
-    /// Parse attributes from a tag like `<tag name=value foo="bar">`.
+    /// Parses attributes from an opening or self-closing tag.
+    ///
+    /// This is a permissive, non-XML-compliant parser intended for LLM-produced text.
+    /// It supports:
+    /// - unquoted values: `<tag name=value>`
+    /// - single/double quoted values: `<tag name="value">`, `<tag name='value'>`
+    /// - boolean attributes: `<tag disabled>` (stored with an empty string value)
+    ///
+    /// It does not handle escapes or entities. Unterminated quoted values are accepted
+    /// and read until the end of the tag.
     fn parse_attributes(&self, tag_content: &str) -> HashMap<String, String> {
         let mut attrs = HashMap::new();
 
-        // Strip < and >
         if tag_content.len() < 3 {
             return attrs;
         }
         let inner = &tag_content[1..tag_content.len() - 1];
 
-        // Skip the tag name (first token)
         let after_name = match inner.split_whitespace().next() {
             Some(name) => {
                 let name_end = inner.find(name).unwrap_or(0) + name.len();
@@ -536,12 +588,10 @@ impl XmlParser {
         let mut chars = after_name.chars().peekable();
 
         while let Some(c) = chars.next() {
-            // Skip whitespace
             if c.is_whitespace() {
                 continue;
             }
 
-            // Read attribute name
             let mut attr_name = String::new();
             attr_name.push(c);
             while let Some(&next) = chars.peek() {
@@ -551,7 +601,6 @@ impl XmlParser {
                 attr_name.push(chars.next().unwrap());
             }
 
-            // Skip whitespace and find =
             while let Some(&next) = chars.peek() {
                 if next == '=' {
                     chars.next();
@@ -563,10 +612,8 @@ impl XmlParser {
                 }
             }
 
-            // Read attribute value
             let mut attr_value = String::new();
 
-            // Skip whitespace before value
             while let Some(&next) = chars.peek() {
                 if !next.is_whitespace() {
                     break;
@@ -576,7 +623,7 @@ impl XmlParser {
 
             if let Some(&quote) = chars.peek() {
                 if quote == '"' || quote == '\'' {
-                    chars.next(); // consume opening quote
+                    chars.next();
                     while let Some(c) = chars.next() {
                         if c == quote {
                             break;
@@ -584,7 +631,6 @@ impl XmlParser {
                         attr_value.push(c);
                     }
                 } else {
-                    // Unquoted value - read until whitespace or /
                     while let Some(&next) = chars.peek() {
                         if next.is_whitespace() || next == '/' {
                             break;
@@ -602,79 +648,87 @@ impl XmlParser {
         attrs
     }
 
-    /// Flush any remaining buffered content as events.
+    /// Flushes any buffered input and returns the resulting events.
+    ///
+    /// This emits:
+    /// - any buffered plain text as [`Event::Output`], and
+    /// - any buffered inner text for an unclosed tracked tag as `Tagged` `Content`.
+    ///
+    /// If the parser has seen a `<` without a matching `>`, `flush` treats the buffered
+    /// partial tag text as literal text.
     pub(crate) fn flush(&mut self) -> Vec<Event> {
-        self.flush_internal()
+        let mut events = Vec::new();
+        self.flush_internal(&mut events);
+        events
     }
 
-    fn flush_internal(&mut self) -> Vec<Event> {
-        let mut events = Vec::new();
-
-        // Handle partial tag at EOF (e.g., "hello <think" - the "<think" is stuck in tag_buffer)
+    fn flush_internal(&mut self, out: &mut Vec<Event>) {
         if self.state.in_tag && !self.state.tag_buffer.is_empty() {
             let partial = std::mem::take(&mut self.state.tag_buffer);
-            if let Some((_, ref mut content, _)) = self.state.open_tags.last_mut() {
-                // Inside a registered tag - append to its content
-                content.push_str(&partial);
+            if let Some(ref mut open) = self.state.open_tag {
+                open.content.push_str(&partial);
             } else {
-                // Top level - append to content buffer
                 self.state.content_buffer.push_str(&partial);
             }
             self.state.in_tag = false;
         }
 
-        // Emit any remaining plain content
         if self.state.content_buffer.len() > self.state.emitted_top_len {
             let remaining = &self.state.content_buffer[self.state.emitted_top_len..];
             if !remaining.is_empty() {
-                events.push(Event::content(remaining));
+                out.push(Event::content(remaining));
             }
         }
         self.state.content_buffer.clear();
         self.state.emitted_top_len = 0;
 
-        // Emit remaining content for any unclosed tags (but no End event since they weren't closed)
-        let drained: Vec<_> = self.state.open_tags.drain(..).collect();
-        for (tag_name, content, attrs) in drained {
-            let already_emitted = self.state.emitted_tag_lens.remove(&tag_name).unwrap_or(0);
-
-            if let Some(tag_handle) = self.tag_map.get(&tag_name) {
-                if content.len() > already_emitted {
-                    let remaining = &content[already_emitted..];
+        if let Some(open) = self.state.open_tag.take() {
+            if let Some(tag_handle) = self.tag_map.get(&open.name) {
+                if open.content.len() > open.emitted_len {
+                    let remaining = &open.content[open.emitted_len..];
                     if !remaining.is_empty() {
-                        events.push(Event::tagged_internal(
+                        out.push(Event::tagged_internal(
                             tag_handle.clone(),
                             remaining,
-                            attrs.clone(),
+                            open.attrs.clone(),
                         ));
                     }
                 }
-                // Don't emit End event for unclosed tags
             }
         }
-
-        events
     }
 
-    /// Returns the set of tag names this parser recognizes.
-    pub fn registered_tags(&self) -> &HashSet<String> {
-        &self.registered_tags
+    /// Returns an iterator over the tag names this parser recognizes.
+    pub fn registered_tags(&self) -> impl Iterator<Item = &str> {
+        self.tag_map.keys().map(|s| s.as_str())
     }
 
-    /// Wrap a token iterator to produce XML parsing events.
+    /// Wraps a token iterator and yields parsing events as they become available.
     ///
-    /// Use this to compose XML parsing with any text generation iterator:
+    /// This method clones `self`, resets the clone, and parses the provided token stream.
+    /// Event boundaries depend on token boundaries; callers should be prepared to
+    /// concatenate adjacent `Content`/`Output` payloads.
+    ///
+    /// # Errors
+    ///
+    /// The inner iterator yields `Result<String, PipelineError>`. When it yields `Err(e)`,
+    /// the returned iterator first yields any events produced by flushing buffered input,
+    /// then yields `Err(e)`, and then terminates.
+    ///
+    /// # Example
     ///
     /// ```rust,ignore
-    /// let mut parser = XmlParserBuilder::new().register_tag("think").build();
+    /// let parser = XmlParserBuilder::new().register_tag("think").build();
     /// let tokens = pipeline.run_iter("...")?;
-    /// let events = parser.parse_iter(tokens);
     ///
-    /// for event in events {
-    ///     match (event.tag(), event.part()) {
-    ///         (Some("think"), TagParts::Content) => println!("[thinking] {}", event.get_content()),
-    ///         (None, TagParts::Content) => print!("{}", event.get_content()),
-    ///         _ => {}
+    /// for event in parser.parse_iter(tokens) {
+    ///     match event {
+    ///         Ok(event) => match (event.tag(), event.part()) {
+    ///             (Some("think"), TagParts::Content) => println!("[thinking] {}", event.get_content()),
+    ///             (None, TagParts::Content) => print!("{}", event.get_content()),
+    ///             _ => {}
+    ///         },
+    ///         Err(e) => eprintln!("Error: {}", e),
     ///     }
     /// }
     /// ```
@@ -686,13 +740,14 @@ impl XmlParser {
     }
 }
 
-/// Sync iterator of XML parsing events.
+/// Iterator that converts a token stream into [`Event`] values.
 ///
-/// Wraps a token iterator and parses XML tags as they arrive.
+/// This iterator wraps a token iterator and parses XML-like tags incrementally.
+/// See [`XmlParser::parse_iter`] for event chunking and error/flush behavior.
 pub struct EventIterator<I> {
     parser: XmlParser,
     inner: I,
-    buffer: Vec<Event>,
+    buffer: VecDeque<Event>,
     flushed: bool,
     pending_error: Option<crate::error::PipelineError>,
 }
@@ -703,7 +758,7 @@ impl<I> EventIterator<I> {
         Self {
             parser,
             inner: iter,
-            buffer: Vec::new(),
+            buffer: VecDeque::new(),
             flushed: false,
             pending_error: None,
         }
@@ -717,55 +772,47 @@ where
     type Item = crate::error::Result<Event>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Return buffered events first
-        if !self.buffer.is_empty() {
-            return Some(Ok(self.buffer.remove(0)));
+        if let Some(event) = self.buffer.pop_front() {
+            return Some(Ok(event));
         }
 
-        // If we have a pending error (after flushing), return it and stop
         if let Some(e) = self.pending_error.take() {
             return Some(Err(e));
         }
 
-        // If already flushed (error occurred), stop
         if self.flushed {
             return None;
         }
 
-        // Get more tokens and parse
         for result in self.inner.by_ref() {
             match result {
                 Ok(token) => {
                     let events = self.parser.parse_token(&token);
                     if !events.is_empty() {
                         self.buffer.extend(events);
-                        return Some(Ok(self.buffer.remove(0)));
+                        return Some(Ok(self.buffer.pop_front().unwrap()));
                     }
                 }
                 Err(e) => {
-                    // Flush partial state before returning error
                     let flush_events = self.parser.flush();
                     self.buffer.extend(flush_events);
                     self.flushed = true;
                     self.pending_error = Some(e);
 
-                    // Return buffered content first, error comes after
-                    if !self.buffer.is_empty() {
-                        return Some(Ok(self.buffer.remove(0)));
+                    if let Some(event) = self.buffer.pop_front() {
+                        return Some(Ok(event));
                     }
-                    // No buffered content, return error immediately
                     return Some(Err(self.pending_error.take().unwrap()));
                 }
             }
         }
 
-        // Flush remaining events (normal completion)
         if !self.flushed {
             self.flushed = true;
             let events = self.parser.flush();
             if !events.is_empty() {
                 self.buffer.extend(events);
-                return Some(Ok(self.buffer.remove(0)));
+                return Some(Ok(self.buffer.pop_front().unwrap()));
             }
         }
 
@@ -892,7 +939,6 @@ mod tests {
             ],
         );
 
-        // Verify plain content reconstruction
         let plain: String = events
             .iter()
             .filter(|e| e.tag().is_none())
