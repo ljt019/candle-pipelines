@@ -110,16 +110,22 @@
 //! Parse XML tags in streaming output with [`XmlParser`]:
 //!
 //! ```rust,no_run
-//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3, TagParts, XmlParserBuilder};
+//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3, Event, TagParts, XmlTag};
 //! # fn main() -> candle_pipelines::error::Result<()> {
+//! // Define which tags to parse using an enum
+//! #[derive(Debug, Clone, PartialEq, XmlTag)]
+//! enum Tags {
+//!     #[tag("think")]
+//!     Think,
+//!     #[tag("answer")]
+//!     Answer,
+//! }
+//!
 //! let pipeline = TextGenerationPipelineBuilder::qwen3(Qwen3::Size0_6B)
 //!     .build()?;
 //!
-//! // Create parser for specific tags
-//! let parser = XmlParserBuilder::new()
-//!     .register_tag("think")
-//!     .register_tag("answer")
-//!     .build();
+//! // Create parser from tag enum
+//! let parser = Tags::parser();
 //!
 //! // Wrap the token iterator with XML parsing
 //! let tokens = pipeline.run_iter("Solve 2+2. Think step by step.")?;
@@ -127,10 +133,12 @@
 //!
 //! for event in events {
 //!     let event = event?; // Propagate errors
-//!     match (event.tag(), event.part()) {
-//!         (Some("think"), TagParts::Content) => print!("[thinking] {}", event.get_content()),
-//!         (Some("answer"), TagParts::Content) => print!("[answer] {}", event.get_content()),
-//!         (None, TagParts::Content) => print!("{}", event.get_content()),
+//!     match event {
+//!         Event::Tagged { tag: Tags::Think, part: TagParts::Content, content, .. } =>
+//!             print!("[thinking] {}", content),
+//!         Event::Tagged { tag: Tags::Answer, part: TagParts::Content, content, .. } =>
+//!             print!("[answer] {}", content),
+//!         Event::Output { content } => print!("{}", content),
 //!         _ => {}
 //!     }
 //! }
@@ -170,10 +178,10 @@ pub use tools::ToolFuture;
 pub use crate::models::{Gemma3, Llama3_2, Olmo3, Qwen3};
 
 pub use builder::TextGenerationPipelineBuilder;
-pub use candle_pipelines_macros::{tool, tools};
+pub use candle_pipelines_macros::{tool, tools, XmlTag};
 pub use message::Message;
 pub use params::GenerationParams;
-pub use xml_parser::{Event, TagParts, XmlParser, XmlParserBuilder};
+pub use xml_parser::{Event, TagParts, XmlParser, XmlTag};
 pub use pipeline::{
     AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, BoxedTokenIterator,
     Output, TextGeneration, TextGenerationPipeline, TokenIterator,

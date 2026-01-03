@@ -14,7 +14,28 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::models::capabilities::{ParseEvent, ToolCallInvocation, ToolCallParser};
-use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlParserBuilder};
+use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlTag};
+
+/// Tags recognized by OLMo-3's tool call format.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Olmo3Tags {
+    FunctionCalls,
+}
+
+impl XmlTag for Olmo3Tags {
+    fn from_tag_str(s: &str) -> Option<Self> {
+        match s.trim() {
+            "function_calls" => Some(Self::FunctionCalls),
+            _ => None,
+        }
+    }
+
+    fn as_tag_str(&self) -> &'static str {
+        match self {
+            Self::FunctionCalls => "function_calls",
+        }
+    }
+}
 
 /// Represents a parsed OLMo-3 tool call.
 #[derive(Debug, Clone)]
@@ -38,7 +59,7 @@ impl Olmo3ToolCall {
 /// Implements [`ToolCallParser`] for integration with the generic tool-aware iterator.
 #[derive(Debug, Clone)]
 pub struct Olmo3Parser {
-    xml_parser: XmlParser,
+    xml_parser: XmlParser<Olmo3Tags>,
     /// Queue of events to emit (FIFO)
     pending_events: VecDeque<ParseEvent>,
 }
@@ -52,51 +73,34 @@ impl Default for Olmo3Parser {
 impl Olmo3Parser {
     /// Create a new OLMo-3 tool call parser.
     pub fn new() -> Self {
-        let xml_parser = XmlParserBuilder::new()
-            .register_tag("function_calls")
-            .build();
-
         Self {
-            xml_parser,
+            xml_parser: XmlParser::new(),
             pending_events: VecDeque::new(),
         }
     }
 
     /// Process an XmlParser event and convert to ParseEvents.
-    fn process_xml_event(&mut self, event: Event) {
-        match &event {
+    fn process_xml_event(&mut self, event: Event<Olmo3Tags>) {
+        match event {
             Event::Tagged {
-                tag, part, content, ..
-            } if tag == "function_calls" => {
-                match part {
-                    TagParts::Start => {
-                        // Function calls block starting - continue buffering
-                    }
-                    TagParts::Content => {
-                        // Content inside function_calls - continue buffering
-                    }
-                    TagParts::End => {
-                        // Block complete - parse all function calls
-                        self.parse_function_calls_block(content);
-                    }
-                }
-            }
-            Event::Tagged {
-                tag: _,
+                tag: Olmo3Tags::FunctionCalls,
                 part,
                 content,
                 ..
             } => {
-                // Other registered tags - emit as text
-                if let TagParts::Content = part {
-                    if !content.is_empty() {
-                        self.pending_events.push_back(ParseEvent::text(content));
+                match part {
+                    TagParts::Start | TagParts::Content => {
+                        // Function calls block starting or content - continue buffering
+                    }
+                    TagParts::End => {
+                        // Block complete - parse all function calls
+                        self.parse_function_calls_block(&content);
                     }
                 }
             }
             Event::Output { content } => {
                 if !content.is_empty() {
-                    self.pending_events.push_back(ParseEvent::text(content));
+                    self.pending_events.push_back(ParseEvent::text(&content));
                 }
             }
         }

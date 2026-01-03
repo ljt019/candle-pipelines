@@ -10,7 +10,29 @@
 use std::collections::VecDeque;
 
 use crate::models::capabilities::{ParseEvent, ToolCallInvocation, ToolCallParser};
-use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlParserBuilder};
+use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlTag};
+
+/// Tags recognized by Qwen3's tool call format.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Qwen3Tags {
+    #[allow(dead_code)]
+    ToolCall,
+}
+
+impl XmlTag for Qwen3Tags {
+    fn from_tag_str(s: &str) -> Option<Self> {
+        match s.trim() {
+            "tool_call" => Some(Self::ToolCall),
+            _ => None,
+        }
+    }
+
+    fn as_tag_str(&self) -> &'static str {
+        match self {
+            Self::ToolCall => "tool_call",
+        }
+    }
+}
 
 /// Parser for Qwen3's XML-wrapped JSON tool call format.
 ///
@@ -18,7 +40,7 @@ use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, 
 /// parses the JSON content inside.
 #[derive(Debug, Clone)]
 pub struct Qwen3Parser {
-    xml_parser: XmlParser,
+    xml_parser: XmlParser<Qwen3Tags>,
     /// Buffer for events that need to be emitted (FIFO queue)
     pending_events: VecDeque<ParseEvent>,
 }
@@ -32,51 +54,34 @@ impl Default for Qwen3Parser {
 impl Qwen3Parser {
     /// Create a new Qwen3 tool call parser.
     pub fn new() -> Self {
-        let xml_parser = XmlParserBuilder::new().register_tag("tool_call").build();
-
         Self {
-            xml_parser,
+            xml_parser: XmlParser::new(),
             pending_events: VecDeque::new(),
         }
     }
 
     /// Process an XmlParser event and convert to ParseEvent.
-    fn process_xml_event(&mut self, event: Event) -> Option<ParseEvent> {
-        match &event {
+    fn process_xml_event(&mut self, event: Event<Qwen3Tags>) -> Option<ParseEvent> {
+        match event {
             Event::Tagged {
-                tag, part, content, ..
-            } if tag == "tool_call" => {
-                match part {
-                    TagParts::Start => {
-                        // Tool call starting - continue buffering
-                        None
-                    }
-                    TagParts::Content => {
-                        // Content inside tool_call - continue buffering
-                        None
-                    }
-                    TagParts::End => {
-                        // Tool call complete - try to parse
-                        // content contains the full XML: <tool_call>...</tool_call>
-                        Some(self.parse_tool_call_content(content))
-                    }
-                }
-            }
-            Event::Tagged {
-                tag: _,
-                part,
+                tag: Qwen3Tags::ToolCall,
+                part: TagParts::End,
                 content,
                 ..
             } => {
-                // Other registered tags - emit as text
-                match part {
-                    TagParts::Content if !content.is_empty() => Some(ParseEvent::text(content)),
-                    _ => None,
-                }
+                // Tool call complete - try to parse
+                Some(self.parse_tool_call_content(&content))
+            }
+            Event::Tagged {
+                tag: Qwen3Tags::ToolCall,
+                ..
+            } => {
+                // Start or Content - continue buffering
+                None
             }
             Event::Output { content } => {
                 if !content.is_empty() {
-                    Some(ParseEvent::text(content))
+                    Some(ParseEvent::text(&content))
                 } else {
                     None
                 }

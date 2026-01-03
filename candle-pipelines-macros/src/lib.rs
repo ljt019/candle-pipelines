@@ -1,6 +1,6 @@
-//! Procedural macros for defining tools that can be called by language models.
+//! Procedural macros for defining tools and XML tag enums.
 //!
-//! See [`tool`] and [`tools!`] for usage.
+//! See [`tool`], [`tools!`], and [`XmlTag`] for usage.
 
 extern crate proc_macro;
 use proc_macro::TokenStream;
@@ -9,7 +9,8 @@ use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
     punctuated::Punctuated,
-    Attribute, Expr, FnArg, Ident, ItemFn, Lit, Meta, Pat, ReturnType, Token, Type,
+    Attribute, Data, DeriveInput, Expr, FnArg, Ident, ItemFn, Lit, Meta, Pat, ReturnType, Token,
+    Type,
 };
 
 fn extract_doc(attrs: &[Attribute]) -> String {
@@ -283,6 +284,123 @@ pub fn tools(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         vec![#(#tool_calls),*]
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Converts PascalCase to snake_case.
+/// e.g., "ToolCall" -> "tool_call", "XMLParser" -> "xml_parser"
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('_');
+            }
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Extracts the tag name from `#[tag("name")]` attribute, or returns None.
+fn extract_tag_attr(attrs: &[Attribute]) -> Option<String> {
+    for attr in attrs {
+        if attr.path().is_ident("tag") {
+            if let Meta::List(meta_list) = &attr.meta {
+                let tokens = meta_list.tokens.to_string();
+                // Parse "name" from the tokens
+                let trimmed = tokens.trim();
+                if trimmed.starts_with('"') && trimmed.ends_with('"') {
+                    return Some(trimmed[1..trimmed.len() - 1].to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Derive macro for implementing [`XmlTag`] on an enum.
+///
+/// Each variant maps to a tag name. Use `#[tag("name")]` to specify a custom name,
+/// or omit it to default to the snake_case variant name.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use candle_pipelines_macros::XmlTag;
+///
+/// #[derive(XmlTag, Clone, PartialEq, Debug)]
+/// enum MyTags {
+///     Think,      // defaults to "think"
+///     ToolCall,   // defaults to "tool_call"
+///     #[tag("custom_name")]
+///     Custom,     // uses "custom_name"
+/// }
+/// ```
+///
+/// The generated impl provides:
+/// - `parser() -> XmlParser<Self>` - Create a parser for this tag enum
+/// - `from_tag_str(s: &str) -> Option<Self>` - Parse a tag name
+/// - `as_tag_str(&self) -> &'static str` - Get the tag name
+#[proc_macro_derive(XmlTag, attributes(tag))]
+pub fn derive_xml_tag(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let variants = match &input.data {
+        Data::Enum(data_enum) => &data_enum.variants,
+        _ => {
+            return syn::Error::new_spanned(&input, "XmlTag can only be derived for enums")
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    let mut from_arms = Vec::new();
+    let mut as_arms = Vec::new();
+
+    for variant in variants {
+        let variant_ident = &variant.ident;
+
+        // Check for #[tag("name")] attribute, default to snake_case variant name
+        let tag_name = extract_tag_attr(&variant.attrs)
+            .unwrap_or_else(|| to_snake_case(&variant_ident.to_string()));
+
+        from_arms.push(quote! {
+            #tag_name => ::core::option::Option::Some(Self::#variant_ident)
+        });
+
+        as_arms.push(quote! {
+            Self::#variant_ident => #tag_name
+        });
+    }
+
+    let expanded = quote! {
+        impl candle_pipelines::text_generation::XmlTag for #name {
+            fn from_tag_str(s: &str) -> ::core::option::Option<Self> {
+                match s.trim() {
+                    #(#from_arms,)*
+                    _ => ::core::option::Option::None,
+                }
+            }
+
+            fn as_tag_str(&self) -> &'static str {
+                match self {
+                    #(#as_arms,)*
+                }
+            }
+        }
+
+        impl #name {
+            /// Creates an [`XmlParser`] for this tag enum.
+            pub fn parser() -> candle_pipelines::text_generation::XmlParser<Self> {
+                candle_pipelines::text_generation::XmlParser::new()
+            }
+        }
     };
 
     TokenStream::from(expanded)
