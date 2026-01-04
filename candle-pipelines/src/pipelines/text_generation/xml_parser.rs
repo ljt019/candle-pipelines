@@ -27,7 +27,7 @@
 //!
 //! ## Parsing Tokens
 //!
-//! ```
+//! ```rust, ignore
 //! // As easy as passing any &str to .parse() and any iter &str to .parse_iter(),
 //! let tokens = pipeline.run_iter("What is 2+2?")?;
 //! let events = parser.parse_iter(tokens)?;
@@ -35,7 +35,7 @@
 //!
 //! ## Handling Events
 //!
-//! ```rust, ignore
+//! ```rust
 //! use candle_pipelines::text_generation::{Event, TagPart, XmlTag};
 //!
 //! #[derive(XmlTag, Clone, PartialEq, Debug)]
@@ -61,17 +61,8 @@
 //! ```
 
 use std::collections::{HashMap, VecDeque};
-use std::marker::PhantomData;
-
-// ##############################################
-//                 Public Api
-// ##############################################
 
 /// An event emitted by [`XmlParser`].
-///
-/// Events come in two forms:
-/// - `Content { text }` - Plain text outside any recognized tag
-/// - `Tag { tag, part }` - A tag-related event with the tag enum and its part
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event<T: XmlTag> {
     /// Plain text outside any recognized tag (including unrecognized tags).
@@ -79,42 +70,40 @@ pub enum Event<T: XmlTag> {
         /// The text content
         text: String,
     },
-    /// A tag-related event.
+    /// Any recognized registered tag, and the content within it.
     Tag {
-        /// The recognized tag variant.
+        /// Matching variant on tag enum
         tag: T,
-        /// Which part of the tag this event represents.
+        /// Which part this event represents: Opened, Content, or Closed.
         part: TagPart,
     },
 }
 
-/// Identifies which portion of a tag an event represents.
+/// A fragment of a tag delivered while parsing.
 ///
-/// Each variant carries the data relevant to that part:
-/// - `Opened` - The opening tag text and attributes
-/// - `Content` - A streaming chunk of text inside the tag
-/// - `Closed` - The closing tag text, full element, and attributes
+/// Normal xml tag sequence: `Opened` → `Content` → `Closed`.
+/// Self-closing elements emit only: `Opened` -> `Closed`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TagPart {
-    /// An opening tag (e.g., `<think reason="deep">`).
+    /// Opening tag
     Opened {
-        /// The opening tag text (e.g., `"<think>"` or `"<think reason=\"deep\">"`)
+        /// The text for Opened is just the tag. (ex. `<think>`)
         text: String,
-        /// Parsed attributes from the opening tag
+        /// Contains the attrs if any on the tag. (ex. `<tool_call name=get_weather>`)
         attrs: HashMap<String, String>,
     },
-    /// Text content inside a tracked tag.
+    /// Content between tags
     Content {
-        /// The text chunk
+        /// The text content
         text: String,
     },
-    /// A closing tag (e.g., `</think>`).
+    /// Closing tag
     Closed {
-        /// The closing tag text (e.g., `"</think>"`) or the full self-closing tag
+        /// The text for Closed is just the end tag. (ex. `</think>`)
         text: String,
-        /// The complete element (e.g., `"<think>content</think>"`)
+        /// The full sequence, useful for parsing out tools primarily.
         element: String,
-        /// Parsed attributes from the opening tag
+        /// Contains the attrs if any were on the opening tag.
         attrs: HashMap<String, String>,
     },
 }
@@ -150,10 +139,17 @@ impl TagPart {
     }
 }
 
-/// Streaming parser for extracting XML-like tagged regions from text.
+/// Parser for extracting XML tags from LLM output.
 ///
-/// Define your tags as an enum with `#[derive(XmlTag)]`, then call `.parser()`
+/// Designed for parsing structured output from [`TextGenerationPipeline`], such as
+/// `<think>` reasoning blocks or `<tool_call>` invocations. This is a minimal parser
+/// optimized for LLM output patterns, not a general-purpose XML parser.
+///
+/// Define your tags as an enum with `#[derive(XmlTag)]`, then call `parser()`
 /// on the enum to create a parser.
+///
+/// Use [`parse()`](Self::parse) for complete strings or [`parse_iter()`](Self::parse_iter)
+/// for token-by-token output. See [`Event`] and [`TagPart`] for the output structure.
 ///
 /// # Example
 ///
@@ -184,26 +180,14 @@ impl TagPart {
 /// }
 /// ```
 ///
-/// # Tag tracking and limitations
+/// # Limitations
 ///
-/// - The parser tracks at most one open tag at a time. It does not support nested tags.
-/// - If a tag appears inside another tag's content, the parser treats it as literal text.
-/// - The parser does not validate XML and does not handle namespaces, entities,
-///   comments, CDATA, or processing instructions. Malformed or mismatched tags are
-///   emitted as plain text.
-///
-/// # Event structure
-///
-/// For a recognized element `<name ...attrs...>inner</name>`:
-/// - `TagPart::Opened { text, attrs }` - The opening tag text and parsed attributes
-/// - Zero or more `TagPart::Content { text }` - Streaming chunks of inner content
-/// - `TagPart::Closed { text, element, attrs }` - The closing tag, full element, and attributes
-///
-/// For a self-closing tag (e.g., `<name a=b/>`), only `TagPart::Closed` is emitted
-/// with both `text` and `element` set to the original self-closing tag text.
+/// - Tracks one open tag at a time; does not support nested tags.
+/// - Tags inside another tag's content are treated as literal text.
+/// - Does not handle namespaces, entities, comments, CDATA, or processing instructions.
+/// - Malformed or mismatched tags are emitted as plain text.
 #[derive(Debug, Clone)]
 pub struct XmlParser<T: XmlTag> {
-    _marker: PhantomData<T>,
     state: ParserState<T>,
 }
 
@@ -213,35 +197,17 @@ impl<T: XmlTag> Default for XmlParser<T> {
     }
 }
 
+/// Public
 impl<T: XmlTag> XmlParser<T> {
-    /// Creates a new parser.
-    ///
-    /// Typically you'll use `MyTags::parser()` instead of calling this directly.
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-            state: ParserState::default(),
-        }
-    }
-
-    /// Clears any partial state from previous parsing.
-    ///
-    /// Call this before reusing a parser for a new input.
-    /// Note: [`parse`](Self::parse) calls this automatically.
-    pub fn reset(&mut self) {
-        self.state = ParserState::default();
-    }
-
     /// Parses `text` and returns all events.
     ///
-    /// Use this for complete strings. For streaming token-by-token parsing,
-    /// use [`parse_iter`](Self::parse_iter) instead.
+    /// For token-by-token parsing, use [`parse_iter`](Self::parse_iter) instead.
     pub fn parse(&mut self, text: &str) -> Vec<Event<T>> {
         self.reset();
         let mut events = Vec::new();
 
         for c in text.chars() {
-            self.process_char_internal(c, &mut events);
+            self.process_char(c, &mut events);
         }
 
         self.flush_internal(&mut events);
@@ -250,9 +216,8 @@ impl<T: XmlTag> XmlParser<T> {
 
     /// Wraps a token iterator and yields parsing events as they become available.
     ///
-    /// Use this for streaming output from an LLM. Events are emitted as tokens arrive,
-    /// so `Content` events may be split across multiple chunks. Concatenate adjacent
-    /// payloads if you need the full content.
+    /// Events are emitted as tokens arrive, so `Content` events may be split across
+    /// multiple chunks. Concatenate adjacent payloads if you need the full content.
     ///
     /// # Errors
     ///
@@ -287,9 +252,26 @@ impl<T: XmlTag> XmlParser<T> {
     }
 }
 
-// ##############################################
-//                 Internal Api
-// ##############################################
+/// Internal
+impl<T: XmlTag> XmlParser<T> {
+    /// Creates a new parser instance.
+    ///
+    /// Hidden from public docs because users should use `TagEnum::parser()` instead.
+    /// Not pub(crate) only because the `XmlTag` derive macro generates code that calls it.
+    #[doc(hidden)]
+    pub fn new() -> Self {
+        Self {
+            state: ParserState::default(),
+        }
+    }
+
+    /// Clears any partial state from previous parsing.
+    ///
+    /// Both [`parse`](Self::parse) and [`parse_iter`](Self::parse_iter) call this automatically.
+    pub(crate) fn reset(&mut self) {
+        self.state = ParserState::default();
+    }
+}
 
 #[doc(hidden)]
 pub trait XmlTag: Sized + Clone + PartialEq + std::fmt::Debug {
@@ -391,7 +373,7 @@ impl<T: XmlTag> Event<T> {
         }
     }
 
-    /// Creates a Content event for a tag (streaming chunk).
+    /// Creates a Content event for a tag.
     pub(crate) fn tag_content(tag: T, text: impl Into<String>) -> Self {
         Event::Tag {
             tag,
@@ -418,12 +400,12 @@ impl<T: XmlTag> Event<T> {
 }
 
 impl<T: XmlTag> XmlParser<T> {
-    /// Parses a chunk of input in streaming mode and returns newly available events.
+    /// Parses a token and returns any newly available events.
     pub(crate) fn parse_token(&mut self, token: &str) -> Vec<Event<T>> {
         let mut events = Vec::new();
 
         for c in token.chars() {
-            self.process_char_internal(c, &mut events);
+            self.process_char(c, &mut events);
         }
 
         if let Some(ref mut open) = self.state.open_tag {
@@ -450,7 +432,7 @@ impl<T: XmlTag> XmlParser<T> {
         events
     }
 
-    fn process_char_internal(&mut self, c: char, out: &mut Vec<Event<T>>) {
+    fn process_char(&mut self, c: char, out: &mut Vec<Event<T>>) {
         match c {
             '<' => {
                 self.state.in_tag = true;
@@ -574,7 +556,7 @@ impl<T: XmlTag> XmlParser<T> {
         }
     }
 
-    fn parse_tag_name(tag_content: &str) -> Option<String> {
+    fn parse_tag_name(tag_content: &str) -> Option<&str> {
         if tag_content.len() < 3 || !tag_content.starts_with('<') || !tag_content.ends_with('>') {
             return None;
         }
@@ -586,16 +568,16 @@ impl<T: XmlTag> XmlParser<T> {
             if trimmed_end.is_empty() {
                 None
             } else {
-                Some(trimmed_end.to_string())
+                Some(trimmed_end)
             }
         } else {
             let trimmed_end = inner.trim_end_matches('/').split_whitespace().next()?;
             let leading_ws = inner.len() - inner.trim_start().len();
             let name_with_leading = &inner[..leading_ws + trimmed_end.len()];
             if let Some(stripped) = name_with_leading.strip_suffix('/') {
-                Some(stripped.to_string())
+                Some(stripped)
             } else {
-                Some(name_with_leading.to_string())
+                Some(name_with_leading)
             }
         }
     }
@@ -1277,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_clears_streaming_state() {
+    fn test_reset_clears_parser_state() {
         let mut parser = XmlParser::<ThinkAnswer>::new();
 
         parser.parse_token("<thi");
