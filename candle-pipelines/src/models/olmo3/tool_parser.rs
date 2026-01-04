@@ -14,7 +14,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::models::capabilities::{ParseEvent, ToolCallInvocation, ToolCallParser};
-use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlTag};
+use crate::pipelines::text_generation::xml_parser::{Event, TagPart, XmlParser, XmlTag};
 
 /// Tags recognized by OLMo-3's tool call format.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,25 +82,19 @@ impl Olmo3Parser {
     /// Process an XmlParser event and convert to ParseEvents.
     fn process_xml_event(&mut self, event: Event<Olmo3Tags>) {
         match event {
-            Event::Tagged {
+            Event::Tag {
                 tag: Olmo3Tags::FunctionCalls,
-                part,
-                content,
-                ..
+                part: TagPart::Closed { element, .. },
             } => {
-                match part {
-                    TagParts::Start | TagParts::Content => {
-                        // Function calls block starting or content - continue buffering
-                    }
-                    TagParts::End => {
-                        // Block complete - parse all function calls
-                        self.parse_function_calls_block(&content);
-                    }
-                }
+                // Block complete - parse all function calls
+                self.parse_function_calls_block(&element);
             }
-            Event::Output { content } => {
-                if !content.is_empty() {
-                    self.pending_events.push_back(ParseEvent::text(&content));
+            Event::Tag { .. } => {
+                // Opened or Content - continue buffering
+            }
+            Event::Content { text } => {
+                if !text.is_empty() {
+                    self.pending_events.push_back(ParseEvent::text(text));
                 }
             }
         }

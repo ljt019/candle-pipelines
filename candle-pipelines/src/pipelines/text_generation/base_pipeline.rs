@@ -1,4 +1,5 @@
 use super::params::{apply_repeat_penalty, initialize_logits_processor, GenerationParams};
+use candle_core::Result as CandleResult;
 use crate::error::{PipelineError, Result};
 use crate::models::capabilities::{ModelConfig, TextGenerationModel};
 use crate::pipelines::stats::GenerationStats;
@@ -96,14 +97,12 @@ where
             }?;
             let logits = logits.squeeze(0)?;
 
-            let start_at = generated_tokens.len().saturating_sub(params.repeat_last_n);
-            let penalty_context = &generated_tokens[start_at..];
-
-            let logits = if params.repeat_penalty <= 1. || penalty_context.is_empty() {
-                logits
-            } else {
-                apply_repeat_penalty(&logits, params.repeat_penalty, penalty_context)?
-            };
+            let logits = apply_repeat_penalty_if_needed(
+                logits,
+                &generated_tokens,
+                params.repeat_penalty,
+                params.repeat_last_n,
+            )?;
 
             next_token = logits_processor.sample(&logits)?;
             generated_tokens.push(next_token);
@@ -277,17 +276,12 @@ where
         }?;
         let logits = logits.squeeze(0)?;
 
-        let start_at = self
-            .generated
-            .len()
-            .saturating_sub(self.params.repeat_last_n);
-        let penalty_context = &self.generated[start_at..];
-
-        let logits = if self.params.repeat_penalty <= 1. || penalty_context.is_empty() {
-            logits
-        } else {
-            apply_repeat_penalty(&logits, self.params.repeat_penalty, penalty_context)?
-        };
+        let logits = apply_repeat_penalty_if_needed(
+            logits,
+            &self.generated,
+            self.params.repeat_penalty,
+            self.params.repeat_last_n,
+        )?;
 
         self.next_token = self.logits_processor.sample(&logits)?;
         self.generated.push(self.next_token);
@@ -357,4 +351,30 @@ where
             }
         }
     }
+}
+
+/// Apply repeat penalty if configured, otherwise return logits unchanged.
+fn apply_repeat_penalty_if_needed(
+    logits: Tensor,
+    generated_tokens: &[u32],
+    repeat_penalty: Option<f32>,
+    repeat_last_n: Option<usize>,
+) -> CandleResult<Tensor> {
+    let Some(penalty) = repeat_penalty else {
+        return Ok(logits);
+    };
+
+    if penalty <= 1.0 {
+        return Ok(logits);
+    }
+
+    let last_n = repeat_last_n.unwrap_or(64);
+    let start_at = generated_tokens.len().saturating_sub(last_n);
+    let penalty_context = &generated_tokens[start_at..];
+
+    if penalty_context.is_empty() {
+        return Ok(logits);
+    }
+
+    apply_repeat_penalty(&logits, penalty, penalty_context)
 }

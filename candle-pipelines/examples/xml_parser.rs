@@ -1,17 +1,14 @@
 use candle_pipelines::error::Result;
 use candle_pipelines::text_generation::{
-    tool, tools, Qwen3, TagParts, TextGenerationPipelineBuilder, XmlTag,
+    tool, tools, Event, Qwen3, TagPart, TextGenerationPipelineBuilder, XmlTag,
 };
 
 /// Tags we want to parse from the model output.
 #[derive(Debug, Clone, PartialEq, XmlTag)]
 enum Tags {
-    #[tag("think")]
-    Think,
-    #[tag("tool_result")]
-    ToolResult,
-    #[tag("tool_call")]
-    ToolCall,
+    Think,      // matches <think>
+    ToolResult, // matches <tool_result>
+    ToolCall,   // matches <tool_call>
 }
 
 #[tool]
@@ -40,40 +37,22 @@ fn main() -> Result<()> {
     println!("\n--- Generated Events ---");
     for event in events {
         match event {
-            // Exhaustive matching on tag variants - no catch-all needed!
-            candle_pipelines::text_generation::Event::Tagged {
-                tag: Tags::Think,
-                part,
-                content,
-                ..
-            } => match part {
-                TagParts::Start => println!("[THINKING]"),
-                TagParts::Content => print!("{}", content),
-                TagParts::End => println!("[DONE THINKING]\n"),
+            Event::Tag { tag: Tags::Think, part } => match part {
+                TagPart::Opened { .. } => println!("[THINKING]"),
+                TagPart::Content { text } => print!("{}", text),
+                TagPart::Closed { .. } => println!("[DONE THINKING]\n"),
             },
-            candle_pipelines::text_generation::Event::Tagged {
-                tag: Tags::ToolResult,
-                part,
-                content,
-                ..
-            } => match part {
-                TagParts::Start => println!("[START TOOL RESULT]"),
-                TagParts::Content => print!("{}", content),
-                TagParts::End => println!("[END TOOL RESULT]\n"),
+            Event::Tag { tag: Tags::ToolResult, part } => match part {
+                TagPart::Opened { .. } => println!("[START TOOL RESULT]"),
+                TagPart::Content { text } => print!("{}", text),
+                TagPart::Closed { .. } => println!("[END TOOL RESULT]\n"),
             },
-            candle_pipelines::text_generation::Event::Tagged {
-                tag: Tags::ToolCall,
-                part,
-                content,
-                ..
-            } => match part {
-                TagParts::Start => println!("[START TOOL CALL]"),
-                TagParts::Content => print!("{}", content),
-                TagParts::End => println!("[END TOOL CALL]\n"),
+            Event::Tag { tag: Tags::ToolCall, part } => match part {
+                TagPart::Opened { .. } => println!("[START TOOL CALL]"),
+                TagPart::Content { text } => print!("{}", text),
+                TagPart::Closed { .. } => println!("[END TOOL CALL]\n"),
             },
-            candle_pipelines::text_generation::Event::Output { content } => {
-                print!("{}", content);
-            }
+            Event::Content { text } => print!("{}", text),
         }
     }
 

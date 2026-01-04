@@ -26,10 +26,10 @@ pub struct GenerationOverrides {
 pub struct GenerationParams {
     /// Randomness of sampling. 0.0 = deterministic, higher = more random.
     pub temperature: f64,
-    /// Penalty for repeating tokens. 1.0 = no penalty, higher = less repetition.
-    pub repeat_penalty: f32,
+    /// Penalty for repeating tokens. None = no penalty, >1.0 = less repetition.
+    pub repeat_penalty: Option<f32>,
     /// Number of recent tokens to consider for repeat penalty.
-    pub repeat_last_n: usize,
+    pub repeat_last_n: Option<usize>,
     /// Random seed for reproducible generation.
     pub seed: u64,
     /// Maximum tokens to generate per turn.
@@ -55,23 +55,8 @@ impl GenerationParams {
                 )
             })?;
 
-        let repeat_penalty = overrides
-            .repeat_penalty
-            .or(config.repeat_penalty)
-            .ok_or_else(|| {
-                PipelineError::Unexpected(
-                    "Missing 'repeat_penalty': set via .repeat_penalty() or ensure model's generation_config.json has it".into()
-                )
-            })?;
-
-        let repeat_last_n = overrides
-            .repeat_last_n
-            .or(config.repeat_last_n)
-            .ok_or_else(|| {
-                PipelineError::Unexpected(
-                    "Missing 'repeat_last_n': set via .repeat_last_n() or ensure model's generation_config.json has it".into()
-                )
-            })?;
+        let repeat_penalty = overrides.repeat_penalty.or(config.repeat_penalty);
+        let repeat_last_n = overrides.repeat_last_n.or(config.repeat_last_n);
 
         // These have sensible universal defaults - seed is random, max_len is context-dependent
         let seed = overrides.seed.unwrap_or_else(rand::random);

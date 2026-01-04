@@ -292,11 +292,11 @@ fn main() -> Result<()> {
         match event.tag() {
             Some("think") => match event.part() {
                 TagParts::Start => println!("[THINKING]"),
-                TagParts::Content => print!("{}", event.get_content()),
+                TagParts::Content => print!("{}", event.content()),
                 TagParts::End => println!("[END THINKING]"),
             },
             None => match event.part() {
-                TagParts::Content => print!("{}", event.get_content()),
+                TagParts::Content => print!("{}", event.content()),
                 _ => {}
             },
             _ => {}

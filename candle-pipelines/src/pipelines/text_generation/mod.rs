@@ -110,7 +110,7 @@
 //! Parse XML tags in streaming output with [`XmlParser`]:
 //!
 //! ```rust,no_run
-//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3, Event, TagParts, XmlTag};
+//! # use candle_pipelines::text_generation::{TextGenerationPipelineBuilder, Qwen3, Event, TagPart, XmlTag};
 //! # fn main() -> candle_pipelines::error::Result<()> {
 //! // Define which tags to parse using an enum
 //! #[derive(Debug, Clone, PartialEq, XmlTag)]
@@ -134,11 +134,9 @@
 //! for event in events {
 //!     let event = event?; // Propagate errors
 //!     match event {
-//!         Event::Tagged { tag: Tags::Think, part: TagParts::Content, content, .. } =>
-//!             print!("[thinking] {}", content),
-//!         Event::Tagged { tag: Tags::Answer, part: TagParts::Content, content, .. } =>
-//!             print!("[answer] {}", content),
-//!         Event::Output { content } => print!("{}", content),
+//!         Event::Tag { tag: Tags::Think, part: TagPart::Content { text } } => print!("[thinking] {}", text),
+//!         Event::Tag { tag: Tags::Answer, part: TagPart::Content { text } } => print!("[answer] {}", text),
+//!         Event::Content { text } => print!("{}", text),
 //!         _ => {}
 //!     }
 //! }
@@ -161,10 +159,10 @@ pub(crate) mod base_pipeline;
 pub(crate) mod builder;
 pub(crate) mod message;
 pub(crate) mod params;
-pub(crate) mod xml_parser;
 pub(crate) mod pipeline;
 pub(crate) mod streaming;
 pub(crate) mod tools;
+pub(crate) mod xml_parser;
 
 // For tool_macro
 #[doc(hidden)]
@@ -177,14 +175,14 @@ pub use tools::ToolFuture;
 // Model config enums - the simple API!
 pub use crate::models::{Gemma3, Llama3_2, Olmo3, Qwen3};
 
+pub use crate::pipelines::stats::GenerationStats;
 pub use builder::TextGenerationPipelineBuilder;
 pub use candle_pipelines_macros::{tool, tools, XmlTag};
 pub use message::Message;
 pub use params::GenerationParams;
-pub use xml_parser::{Event, TagParts, XmlParser, XmlTag};
 pub use pipeline::{
     AnyTextGenerationPipeline, AnyTextGenerationPipelineExt, BoxedIterator, BoxedTokenIterator,
     Output, TextGeneration, TextGenerationPipeline, TokenIterator,
 };
 pub use tools::{ErrorStrategy, Tool};
-pub use crate::pipelines::stats::GenerationStats;
+pub use xml_parser::{Event, TagPart, XmlParser, XmlTag};

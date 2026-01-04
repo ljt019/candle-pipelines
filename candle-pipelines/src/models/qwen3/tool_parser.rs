@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 
 use crate::models::capabilities::{ParseEvent, ToolCallInvocation, ToolCallParser};
-use crate::pipelines::text_generation::xml_parser::{Event, TagParts, XmlParser, XmlTag};
+use crate::pipelines::text_generation::xml_parser::{Event, TagPart, XmlParser, XmlTag};
 
 /// Tags recognized by Qwen3's tool call format.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,25 +63,20 @@ impl Qwen3Parser {
     /// Process an XmlParser event and convert to ParseEvent.
     fn process_xml_event(&mut self, event: Event<Qwen3Tags>) -> Option<ParseEvent> {
         match event {
-            Event::Tagged {
+            Event::Tag {
                 tag: Qwen3Tags::ToolCall,
-                part: TagParts::End,
-                content,
-                ..
+                part: TagPart::Closed { element, .. },
             } => {
                 // Tool call complete - try to parse
-                Some(self.parse_tool_call_content(&content))
+                Some(self.parse_tool_call_content(&element))
             }
-            Event::Tagged {
-                tag: Qwen3Tags::ToolCall,
-                ..
-            } => {
-                // Start or Content - continue buffering
+            Event::Tag { .. } => {
+                // Opened or Content - continue buffering
                 None
             }
-            Event::Output { content } => {
-                if !content.is_empty() {
-                    Some(ParseEvent::text(&content))
+            Event::Content { text } => {
+                if !text.is_empty() {
+                    Some(ParseEvent::text(text))
                 } else {
                     None
                 }

@@ -325,27 +325,38 @@ fn extract_tag_attr(attrs: &[Attribute]) -> Option<String> {
 
 /// Derive macro for implementing [`XmlTag`] on an enum.
 ///
-/// Each variant maps to a tag name. Use `#[tag("name")]` to specify a custom name,
-/// or omit it to default to the snake_case variant name.
+/// Each variant maps to a tag name. Variant names are converted to snake_case by default
+/// (e.g., `ToolCall` → `"tool_call"`). Use `#[tag("name")]` to override with a custom name.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// use candle_pipelines_macros::XmlTag;
+/// use candle_pipelines::text_generation::{XmlTag, Event, TagPart};
 ///
 /// #[derive(XmlTag, Clone, PartialEq, Debug)]
 /// enum MyTags {
-///     Think,      // defaults to "think"
-///     ToolCall,   // defaults to "tool_call"
+///     Think,      // matches <think>
+///     ToolCall,   // matches <tool_call>
 ///     #[tag("custom_name")]
-///     Custom,     // uses "custom_name"
+///     Custom,     // matches <custom_name>
+/// }
+///
+/// let mut parser = MyTags::parser();
+/// for event in parser.parse("<think>content</think>") {
+///     match event {
+///         Event::Tag { tag: MyTags::Think, part: TagPart::Content { text } } => println!("{}", text),
+///         Event::Tag { tag: MyTags::ToolCall, part: TagPart::Content { text } } => println!("{}", text),
+///         Event::Tag { tag: MyTags::Custom, part: TagPart::Content { text } } => println!("{}", text),
+///         Event::Content { text } => print!("{}", text),
+///         _ => {}
+///     }
 /// }
 /// ```
 ///
 /// The generated impl provides:
 /// - `parser() -> XmlParser<Self>` - Create a parser for this tag enum
-/// - `from_tag_str(s: &str) -> Option<Self>` - Parse a tag name
-/// - `as_tag_str(&self) -> &'static str` - Get the tag name
+/// - `from_tag_str(s: &str) -> Option<Self>` - Parse a tag name to variant
+/// - `as_tag_str(&self) -> &'static str` - Get the tag name string
 #[proc_macro_derive(XmlTag, attributes(tag))]
 pub fn derive_xml_tag(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
